@@ -22,12 +22,15 @@ export interface ServerOptions {
 /** client/dist, found alike from src/routes and from dist/routes, which lie equally deep. */
 const CLIENT_DIR = fileURLToPath(new URL('../../client/dist/', import.meta.url));
 
+/** Request headers that may carry a token; the request log shows them as [Redacted]. */
+const TOKEN_HEADERS = ['req.headers.authorization', 'req.headers["sec-websocket-protocol"]'];
+
 /** Builds the HTTP server around the routes handed in; the WebSocket gateway attaches to it. */
 export function createServer(options: ServerOptions): Server {
   const app = express();
 
   app.use(helmet());
-  app.use(pinoHttp({ logger: options.logger }));
+  app.use(pinoHttp({ logger: options.logger, redact: TOKEN_HEADERS }));
   app.use(allowCrossOrigin(options.allowedOrigins));
 
   // Liveness only: it answers whether the process runs, not whether it can work.

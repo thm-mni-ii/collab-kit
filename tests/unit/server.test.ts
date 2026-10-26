@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import express, { Router } from 'express';
 import pino from 'pino';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createServer } from '../../src/routes/server.ts';
 
@@ -60,6 +60,23 @@ describe('createServer', () => {
     await request(createServer({ logger, api })).get('/boom');
 
     expect(lines.join('')).toContain('the reason nobody outside may read');
+  });
+
+  it('keeps the token out of the request log', async () => {
+    const lines: string[] = [];
+    const logger = pino({ level: 'info' }, { write: (line: string) => lines.push(line) });
+
+    await request(createServer({ logger }))
+      .get('/health')
+      .set('Authorization', 'Bearer the.secret.token')
+      .set('Sec-WebSocket-Protocol', 'bearer, the.secret.token');
+
+    // The request is logged once the response is done, which may be after the client has it.
+    await vi.waitFor(() => expect(lines.join('')).toContain('request completed'));
+    const log = lines.join('');
+    expect(log).toContain('"authorization":"[Redacted]"');
+    expect(log).toContain('"sec-websocket-protocol":"[Redacted]"');
+    expect(log).not.toContain('the.secret.token');
   });
 
   it('keeps the status of what the client got wrong', async () => {
