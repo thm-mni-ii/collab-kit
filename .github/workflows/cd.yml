@@ -38,6 +38,10 @@ jobs:
             exit 1
           fi
 
+      # Emulates arm64 on the amd64 runner, for the steps of the image that run there.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -63,6 +67,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          # Macs with an Apple chip pull arm64.
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

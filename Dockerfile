@@ -1,5 +1,6 @@
-# Build stage: needs the dev dependencies to compile TypeScript.
-FROM node:24-alpine AS build
+# Build stage: needs the dev dependencies to compile TypeScript. It runs on the platform
+# of the builder for every target, as its output is JavaScript alone.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
