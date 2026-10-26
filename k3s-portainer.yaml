@@ -174,7 +174,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/mischa1337/collab-kit:latest
+          image: ghcr.io/thm-mni-ii/collab-kit:latest
           imagePullPolicy: Always
           ports:
             - name: http
