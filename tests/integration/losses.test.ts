@@ -251,7 +251,7 @@ describe('a place removed while somebody wrote in it', () => {
     alice.doc.getMap('m').delete('cell');
     await stored(workpieceId, 2);
 
-    // Everyone leaves, so the workpiece comes back from the fold.
+    // Everyone leaves, so the workpiece comes back from the database.
     await Promise.all([carol.close(), alice.close()]);
     expect(await waitFor(() => gateway.countFor(workpieceId) === 0)).toBe(true);
 

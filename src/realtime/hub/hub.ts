@@ -8,7 +8,14 @@ import { recordEvent, type EventRecord } from '../../db/collections/events.ts';
 import { stampField, stampsOf, type Author } from '../../db/collections/pseudonyms.ts';
 import { newestUpdateId } from '../../db/collections/updates.ts';
 import { defined } from '../../utils/optional.ts';
-import { enqueue, foldNow, loadWorkpiece, storeUpdate, type Stored } from './persistence.ts';
+import {
+  enqueue,
+  loadWorkpiece,
+  SNAPSHOT_EVERY,
+  snapshotUpTo,
+  storeUpdate,
+  type Stored,
+} from './persistence.ts';
 import type { Connection, HubOptions, Merge, OpenWorkpiece, WorkpieceHub } from './types.ts';
 import { encodeAwareness, encodeSyncUpdate, SENDER_DELETES } from '../connection/protocol.ts';
 import { createBundling } from '../conflicts/bundling.ts';
@@ -66,7 +73,6 @@ interface AwarenessChange {
 
 /** Keeps one Y.Doc per open workpiece, passes changes on and keeps traces of who was there. */
 export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
-  const foldEvery = options.foldEvery ?? 400;
   const noteActor = options.noteActor ?? createActorNotes(options.db, options.logger);
   const tracing = createTracing(options.db, options.logger);
   // Removals wait for a pause, so deleting letter by letter does not make an event per letter.
@@ -88,7 +94,7 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
     connections: Set<Connection>,
     merges: MergeCount,
   ): Promise<Loaded> {
-    const { doc, stored, units } = await loadWorkpiece(options.db, workpieceId);
+    const { doc, stored, units } = await loadWorkpiece(options.db, options.logger, workpieceId);
     const announcedBy = new Map<number, Connection>();
     // Where the tool keeps its units, so each conflict hangs on the unit it hit.
     const containers = containersOf(units);
@@ -235,9 +241,9 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
         }
       }
 
-      // Now and then, so the next load does not replay the whole history.
-      if (loaded.stored.updatesSinceFoldAttempt >= foldEvery) {
-        await tryFold(loaded);
+      // Beside the queue, so no state lies further than SNAPSHOT_EVERY changes from a snapshot.
+      if (loaded.stored.updatesSinceSnapshot >= SNAPSHOT_EVERY && !loaded.stored.snapshotting) {
+        void tracked(laySnapshot(loaded.stored));
       }
     }).catch((error: unknown) => {
       options.logger.error(
@@ -293,15 +299,25 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
     }
   }
 
-  /** Folds; a failure is only logged, every change is stored and it costs only load time. */
-  async function tryFold(loaded: Loaded): Promise<void> {
+  /** Lays the next snapshot from the stored chain; a failure is only logged, it costs only time. */
+  async function laySnapshot(stored: Stored): Promise<void> {
+    const upTo = stored.lastUpdateId;
+    if (upTo === undefined) {
+      return;
+    }
+
+    // Counted from the attempt, so one that keeps failing waits as long as the first one did.
+    stored.updatesSinceSnapshot = 0;
+    stored.snapshotting = true;
     try {
-      await foldNow(options.db, loaded.stored, loaded.workpiece.doc);
+      await snapshotUpTo(options.db, options.logger, stored.workpieceId, upTo);
     } catch (error) {
       options.logger.error(
-        { err: error, workpieceId: loaded.workpiece.workpieceId.toHexString() },
-        'could not fold, the changes stay and the next load reads them',
+        { err: error, workpieceId: stored.workpieceId.toHexString() },
+        'could not lay a snapshot, rebuilding replays further until the next one',
       );
+    } finally {
+      stored.snapshotting = false;
     }
   }
 
@@ -329,7 +345,7 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
     ]);
   }
 
-  /** Folds and frees the workpiece after the last one left; force is for the shutdown. */
+  /** Frees the workpiece after the last one left; force is for the shutdown. */
   async function release(key: string, loaded: Loaded, force = false): Promise<void> {
     // Waits until every queued change is stored.
     await loaded.stored.queue;
@@ -337,13 +353,10 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
     // What is gathered goes now, without waiting for the pause.
     await bundling.flush(loaded);
 
-    // Already closed and freed; folding it now would store the change that failed.
+    // Already closed and freed when a change could not be stored.
     if (discarded.has(loaded)) {
       return;
     }
-
-    // The last one out folds, the state is in memory anyway.
-    await tryFold(loaded);
 
     // Somebody may have joined meanwhile, or a merge runs into it, so it has to stay.
     if (!force && (loaded.workpiece.connections.size > 0 || loaded.merges.running > 0)) {

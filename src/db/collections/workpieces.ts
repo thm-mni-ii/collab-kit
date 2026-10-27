@@ -1,14 +1,8 @@
-import { Binary, ObjectId, type Db, type Document } from 'mongodb';
+import { ObjectId, type Db, type Document } from 'mongodb';
 
 import { defined } from '../../utils/optional.ts';
 import type { CollectionDefinition } from '../apply.ts';
 import { stampField, stampsSchema, type Stamp } from './pseudonyms.ts';
-
-/** The loading shortcut: the folded Yjs state and the last update it contains. */
-export interface FoldedState {
-  state: Binary;
-  upToUpdateId: ObjectId;
-}
 
 /** A Y.Map whose keys are the units, at a path of map keys that starts at a root type. */
 export interface UnitContainer {
@@ -22,7 +16,7 @@ export interface ForkOrigin {
   at?: ObjectId;
 }
 
-/** One row per Y.Doc; fold is only a loading shortcut, the truth is the update stream. */
+/** One row per Y.Doc; its content is the update stream, snapshots are only a shortcut. */
 export interface WorkpieceRecord {
   _id: ObjectId;
   name: string;
@@ -32,8 +26,6 @@ export interface WorkpieceRecord {
   units: UnitContainer[];
   /** Only at a fork: where it was forked from. */
   forkOf?: ForkOrigin;
-  /** Absent until the workpiece has been folded for the first time. */
-  fold?: FoldedState;
   createdAt: Date;
   createdBy: string;
   /** Whether whoever created it wrote anonymously, with the pseudonym; decided when they did. */
@@ -71,15 +63,6 @@ export const workpiecesDefinition: CollectionDefinition = {
         properties: {
           id: { bsonType: 'objectId' },
           at: { bsonType: 'objectId', description: 'absent if the source had no change yet' },
-        },
-      },
-      fold: {
-        bsonType: 'object',
-        description: 'the loading shortcut, absent until first folded',
-        required: ['state', 'upToUpdateId'],
-        properties: {
-          state: { bsonType: 'binData', description: 'folded Yjs state' },
-          upToUpdateId: { bsonType: 'objectId', description: 'the last update folded into state' },
         },
       },
       createdAt: { bsonType: 'date' },
@@ -124,32 +107,22 @@ export async function createWorkpiece(
   return created;
 }
 
-/** A workpiece as a thing, without the folded state that only loading needs. */
-export type Workpiece = Omit<WorkpieceRecord, 'fold'>;
+/** A workpiece as a thing, as it is stored. */
+export type Workpiece = WorkpieceRecord;
 
-/** Leaves the folded state in the database: it can be large, and a check never needs it. */
+/** The workpiece, or null if nobody created it. */
 export async function findWorkpiece(db: Db, id: ObjectId): Promise<Workpiece | null> {
-  return db
-    .collection<WorkpieceRecord>('workpieces')
-    .findOne<Workpiece>({ _id: id }, { projection: { fold: 0 } });
-}
-
-/** These workpieces, or every one when no keys are named; without the folded state, as above. */
-export async function findWorkpieces(db: Db, ids?: readonly ObjectId[]): Promise<Workpiece[]> {
-  const filter = ids === undefined ? {} : { _id: { $in: [...ids] } };
-
-  return db
-    .collection<WorkpieceRecord>('workpieces')
-    .find<Workpiece>(filter, { projection: { fold: 0 } })
-    .toArray();
-}
-
-/** The whole stored workpiece, folded state included, for loading it into memory. */
-export async function findWorkpieceWithFold(db: Db, id: ObjectId): Promise<WorkpieceRecord | null> {
   return db.collection<WorkpieceRecord>('workpieces').findOne({ _id: id });
 }
 
-/** Whether the workpiece is there, without loading its folded state along the way. */
+/** These workpieces, or every one when no keys are named. */
+export async function findWorkpieces(db: Db, ids?: readonly ObjectId[]): Promise<Workpiece[]> {
+  const filter = ids === undefined ? {} : { _id: { $in: [...ids] } };
+
+  return db.collection<WorkpieceRecord>('workpieces').find(filter).toArray();
+}
+
+/** Whether the workpiece is there, reading nothing but its key. */
 export async function workpieceExists(db: Db, id: ObjectId): Promise<boolean> {
   const found = await db
     .collection<WorkpieceRecord>('workpieces')
@@ -179,31 +152,4 @@ export async function ownForks(db: Db, actorId: string): Promise<ObjectId[]> {
     .toArray();
 
   return found.map((workpiece) => workpiece._id);
-}
-
-export interface Fold {
-  readonly workpieceId: ObjectId;
-  /** The state as the caller folded it, produced by Yjs, opaque here. */
-  readonly state: Uint8Array;
-  /** The last update contained in that state. */
-  readonly upToUpdateId: ObjectId;
-  /** What fold.upToUpdateId held when the folding began. Absent means never folded. */
-  readonly expected?: ObjectId;
-}
-
-/** Swaps in a newer state only if nobody folded meanwhile; losing the race costs nothing. */
-export async function foldState(db: Db, input: Fold): Promise<boolean> {
-  const result = await db.collection<WorkpieceRecord>('workpieces').updateOne(
-    {
-      _id: input.workpieceId,
-      'fold.upToUpdateId': input.expected ?? { $exists: false },
-    },
-    {
-      $set: {
-        fold: { state: new Binary(input.state), upToUpdateId: input.upToUpdateId },
-      },
-    },
-  );
-
-  return result.matchedCount === 1;
 }

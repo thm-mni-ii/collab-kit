@@ -84,12 +84,10 @@ export interface WorkpieceHub {
   close(): Promise<void>;
 }
 
-/** What a hub is made with: where it stores and logs, how often it folds, who notes names. */
+/** What a hub is made with: where it stores and logs, how it bundles, who notes names. */
 export interface HubOptions {
   readonly db: Db;
   readonly logger: Logger;
-  /** Changes that may pile up before folding again; only a matter of loading time. */
-  readonly foldEvery?: number;
   /** Milliseconds without a further removal before the removals of a person are written as one. */
   readonly bundlePause?: number;
   /** Milliseconds after the first removal of a bundle by which it is written at the latest. */

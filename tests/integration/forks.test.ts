@@ -14,12 +14,9 @@ import { latestEvent, readEvents, type EventRecord } from '../../src/db/collecti
 import { setGrant } from '../../src/db/collections/grants.ts';
 import { createGroup } from '../../src/db/collections/groups.ts';
 import { addToRoom, createRoom } from '../../src/db/collections/rooms.ts';
+import type { SnapshotRecord } from '../../src/db/collections/snapshots.ts';
 import { appendUpdate, readUpdatesSince } from '../../src/db/collections/updates.ts';
-import {
-  createWorkpiece,
-  findWorkpieceWithFold,
-  type UnitContainer,
-} from '../../src/db/collections/workpieces.ts';
+import { createWorkpiece, type UnitContainer } from '../../src/db/collections/workpieces.ts';
 import { collectionDefinitions } from '../../src/db/schemas.ts';
 import type { Right } from '../../src/model/right.ts';
 import {
@@ -29,6 +26,7 @@ import {
   type Gateway,
   type Connection,
 } from '../../src/realtime/index.ts';
+import { SNAPSHOT_EVERY } from '../../src/realtime/hub/persistence.ts';
 import { createApi } from '../../src/routes/index.ts';
 import { createServer } from '../../src/routes/server.ts';
 import { connectClient, waitFor } from './yjs-client.ts';
@@ -128,8 +126,15 @@ const closed = async (workpieceId: ObjectId) =>
 /** The stored state of a workpiece as a doc to read from. */
 async function stateOf(workpieceId: ObjectId): Promise<Y.Doc> {
   const doc = new Y.Doc();
-  Y.applyUpdate(doc, (await readStateAt(storage.db, workpieceId)).state);
+  Y.applyUpdate(doc, (await readStateAt(storage.db, silent, workpieceId)).state);
   return doc;
+}
+
+/** The text t of a state as Yjs bytes. */
+function textIn(state: Uint8Array): string {
+  const doc = new Y.Doc();
+  Y.applyUpdate(doc, state);
+  return doc.getText('t').toString();
 }
 
 /** The text t of the stored state. */
@@ -307,6 +312,70 @@ describe('forking', () => {
       anchor: { unit: 'c1' },
     });
     await bob.close();
+  });
+
+  it('gives at each point the same state as its source, laying its own snapshots', async () => {
+    const roomId = await team();
+    const groupWork = await workpieceIn(roomId);
+    // A long history as the hub stores it, its snapshots laid by reading it once.
+    const tool = new Y.Doc();
+    const sent: Uint8Array[] = [];
+    tool.on('update', (update: Uint8Array) => sent.push(update));
+    for (let index = 0; index < 2 * SNAPSHOT_EVERY + 50; index += 1) {
+      tool.getText('t').insert(index, String(index % 10));
+    }
+    /* eslint-disable no-await-in-loop */
+    for (const bytes of sent) {
+      await appendUpdate(storage.db, {
+        workpieceId: groupWork,
+        bytes,
+        clients: [],
+        createdBy: 'alice',
+      });
+    }
+    /* eslint-enable no-await-in-loop */
+    await readStateAt(storage.db, silent, groupWork);
+    const source = await changesOf(groupWork);
+    const at = source[2 * SNAPSHOT_EVERY + 30]!._id;
+
+    const forked = await fork('alice', groupWork, {
+      name: 'Eigene Kopie',
+      at: at.toHexString(),
+      roomId: roomId.toHexString(),
+    });
+    expect(forked.status).toBe(201);
+    const own = new ObjectId(forked.body._id as string);
+    const copies = await changesOf(own);
+    expect(copies).toHaveLength(2 * SNAPSHOT_EVERY + 31);
+
+    // Before, on and after a border, as the fork has no snapshot until reading lays one.
+    /* eslint-disable no-await-in-loop */
+    for (const index of [
+      0,
+      SNAPSHOT_EVERY - 2,
+      SNAPSHOT_EVERY - 1,
+      SNAPSHOT_EVERY,
+      copies.length - 1,
+    ]) {
+      const [ofSource, ofFork] = await Promise.all([
+        readStateAt(storage.db, silent, groupWork, source[index]!._id),
+        readStateAt(storage.db, silent, own, copies[index]!._id),
+      ]);
+      expect(Y.encodeStateVectorFromUpdate(ofFork.state)).toEqual(
+        Y.encodeStateVectorFromUpdate(ofSource.state),
+      );
+      expect(textIn(ofFork.state)).toBe(textIn(ofSource.state));
+    }
+    /* eslint-enable no-await-in-loop */
+    const laid = await storage.db
+      .collection<SnapshotRecord>('snapshots')
+      .find({ workpieceId: own })
+      .sort({ upToUpdateId: 1 })
+      .toArray();
+    expect(laid.map((snapshot) => snapshot.upToUpdateId)).toEqual([
+      copies[SNAPSHOT_EVERY - 1]!._id,
+      copies[2 * SNAPSHOT_EVERY - 1]!._id,
+    ]);
   });
 });
 
@@ -530,7 +599,7 @@ describe('merging', () => {
     await bob.close();
   });
 
-  it('loads a closed target and lets go of it again, folded', async () => {
+  it('loads a closed target and lets go of it again', async () => {
     const roomId = await team();
     const groupWork = await workpieceIn(roomId);
     const own = await forkInto('alice', groupWork, roomId);
@@ -542,8 +611,7 @@ describe('merging', () => {
     const merged = await mergeFrom('alice', groupWork, own);
 
     expect(gateway.countFor(groupWork)).toBe(0);
-    const folded = await findWorkpieceWithFold(storage.db, groupWork);
-    expect(folded?.fold?.upToUpdateId.toHexString()).toBe(merged.at);
+    expect((await changesOf(groupWork)).at(-1)?._id.toHexString()).toBe(merged.at);
     expect(await textOf(groupWork)).toBe('allein');
   });
 
@@ -568,13 +636,8 @@ describe('merging', () => {
     expect(merged.body.detail.count).toBe(200);
     await closed(groupWork);
     expect(await textOf(groupWork)).toBe('x'.repeat(200));
-    expect(
-      await waitFor(
-        async () =>
-          (await findWorkpieceWithFold(storage.db, groupWork))?.fold?.upToUpdateId.toHexString() ===
-          merged.body.at,
-      ),
-    ).toBe(true);
+    expect(await changesOf(groupWork)).toHaveLength(200);
+    expect((await changesOf(groupWork)).at(-1)?._id.toHexString()).toBe(merged.body.at);
   });
 
   it('loses nothing when the last one leaves just as a merge begins', async () => {
