@@ -144,6 +144,14 @@ export const styles = css`
     background: var(--surface-alt);
     color: var(--text);
   }
+  .item.fork {
+    padding-left: 24px;
+  }
+  .sub {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
   .head,
   .row {
     display: flex;
@@ -173,7 +181,8 @@ export const styles = css`
     border-radius: calc(var(--radius) - 2px);
     color: var(--text-muted);
   }
-  .chip[aria-pressed='true'] {
+  .chip[aria-pressed='true'],
+  .chip.held {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--on-accent);
