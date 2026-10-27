@@ -1,12 +1,21 @@
 /** The routes of CK as one thin function each, grouped as CK groups them. */
 
-import type { CollabKitApi, EventRoutes } from './api.ts';
+import { CollabKitError, type CollabKitApi, type EventRoutes, type UnitsAtOptions } from './api.ts';
 import { callRoute, fetchRoute, type CallOptions, type Query } from './http.ts';
 
 /** Every route, without the session and the events of all rooms, which are none. */
 export type Routes = Omit<CollabKitApi, 'open' | 'events'> & {
   readonly events: Omit<EventRoutes, 'inRooms'>;
 };
+
+/** What CK answers for the units of a state: each container it was named with, values as JSON. */
+interface UnitsAnswer {
+  readonly upToUpdateId?: string;
+  readonly containers: readonly {
+    readonly path: readonly string[];
+    readonly units: Readonly<Record<string, unknown>>;
+  }[];
+}
 
 /** A key as one path segment, so an actor key with a slash stays one. */
 const segment = (key: string): string => encodeURIComponent(key);
@@ -71,6 +80,19 @@ export function createRoutes(baseUrl: string, getToken: () => string | Promise<s
         // Which change the state reaches, so the tool knows what it holds.
         const upToUpdateId = response.headers.get('X-Up-To-Update-Id');
         return upToUpdateId === null ? { state } : { state, upToUpdateId };
+      },
+      unitsAt: async <Value>(id: string, { at, map = 'units' }: UnitsAtOptions = {}) => {
+        const { containers, upToUpdateId } = await read<UnitsAnswer>(
+          `/workpieces/${segment(id)}/units`,
+          { at },
+        );
+        // The map as open reads it, a top Y.Map; CK hands out only those the workpiece named.
+        const container = containers.find(({ path }) => path.length === 1 && path[0] === map);
+        if (container === undefined) {
+          throw new CollabKitError(400, `map ${map} is not among the units of this workpiece`);
+        }
+        const units = new Map(Object.entries(container.units) as [string, Value][]);
+        return upToUpdateId === undefined ? { units } : { units, upToUpdateId };
       },
       checkpoint: (id, checkpoint = {}) =>
         write('POST', `/workpieces/${segment(id)}/checkpoints`, checkpoint),

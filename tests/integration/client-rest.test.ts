@@ -59,6 +59,7 @@ const ROUTES = [
   'GET /workpieces/:id/updates',
   'GET /workpieces/:id/activity',
   'GET /workpieces/:id/state',
+  'GET /workpieces/:id/units',
   'POST /workpieces/:id/checkpoints',
   'POST /workpieces/:id/forks',
   'POST /workpieces/:id/merges',
@@ -302,6 +303,46 @@ describe('the REST wrapper', () => {
     expect((await carol.me.events({ kind: 'workpiece-merged' })).map((event) => event._id)).toEqual(
       [merged._id],
     );
+  });
+
+  it('reads the units of a state without Yjs, from the map the workpiece named', async () => {
+    const room = await alice.rooms.create({ name: 'Zeitleiste' });
+    const workpiece = await alice.workpieces.create({
+      name: 'Modell',
+      roomId: room._id,
+      units: [{ path: ['cells'] }],
+    });
+    const session = alice.open<{ readonly xml: string }>(workpiece._id, { map: 'cells' });
+    opened.push(session);
+    await session.synced;
+
+    // One change after the other, so each is stored on its own.
+    const stored = (count: number) =>
+      waitFor(async () => (await alice.workpieces.updates(workpiece._id)).length === count);
+    session.units.update({ set: { a: { xml: '<a/>' } } });
+    expect(await stored(1)).toBe(true);
+    session.units.update({ set: { b: { xml: '<b/>' } } });
+    expect(await stored(2)).toBe(true);
+    const [first, second] = await alice.workpieces.updates(workpiece._id);
+
+    const newest = await alice.workpieces.unitsAt<{ readonly xml: string }>(workpiece._id, {
+      map: 'cells',
+    });
+    expect(newest).toEqual({
+      units: new Map([
+        ['a', { xml: '<a/>' }],
+        ['b', { xml: '<b/>' }],
+      ]),
+      upToUpdateId: second?._id,
+    });
+    expect(await alice.workpieces.unitsAt(workpiece._id, { at: first!._id, map: 'cells' })).toEqual(
+      { units: new Map([['a', { xml: '<a/>' }]]), upToUpdateId: first!._id },
+    );
+
+    // Left out, the map is units, which this workpiece never named.
+    const unnamed = alice.workpieces.unitsAt(workpiece._id);
+    await expect(unnamed).rejects.toBeInstanceOf(CollabKitError);
+    await expect(unnamed).rejects.toMatchObject({ status: 400 });
   });
 
   it('tells who is connected to which workpiece of a room right now', async () => {

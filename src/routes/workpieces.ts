@@ -13,7 +13,9 @@ import type { Actor } from '../model/actor.ts';
 import {
   forkWorkpiece,
   mergeWorkpiece,
+  readDocAt,
   readStateAt,
+  unitsIn,
   type WorkpieceHub,
 } from '../realtime/index.ts';
 import { asCount, asObject, asObjectId, asText, asUnits } from '../utils/input.ts';
@@ -187,6 +189,37 @@ export function workpieceRoutes(db: Db, hub: WorkpieceHub, logger: Logger): Rout
       response.set('X-Up-To-Update-Id', upToUpdateId.toHexString());
     }
     response.type('application/octet-stream').send(Buffer.from(state));
+  });
+
+  /** The same state as JSON, only what the containers the workpiece named hold; no Yjs needed. */
+  routes.get('/workpieces/:id/units', seeing, async (request, response) => {
+    const at = asObjectId(request.query['at']);
+
+    const unusable = unusableField(request.query, { at });
+    if (unusable !== undefined) {
+      return fail(response, 400, `${unusable} is unusable`);
+    }
+
+    const id = idOf(request);
+    if (at !== undefined && !(await isUpdateOf(db, id, at))) {
+      return fail(response, 404, 'unknown change');
+    }
+
+    const workpiece = await findWorkpiece(db, id);
+    if (workpiece === null) {
+      return fail(response, 404, 'unknown workpiece');
+    }
+
+    // Read straight from the rebuilt doc, so the state is not encoded and decoded once more.
+    const { doc, upToUpdateId } = await readDocAt(db, logger, id, at);
+    try {
+      response.json({
+        ...defined({ upToUpdateId }),
+        containers: unitsIn(doc, workpiece.units),
+      });
+    } finally {
+      doc.destroy();
+    }
   });
 
   /** Names this moment; reason is the only place in the model for the why of a change. */
