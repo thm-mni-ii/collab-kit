@@ -15,7 +15,6 @@ import { createGroup } from '../../src/db/collections/groups.ts';
 import { createRoom } from '../../src/db/collections/rooms.ts';
 import { createTask, type NewTask } from '../../src/db/collections/tasks.ts';
 import { appendUpdate } from '../../src/db/collections/updates.ts';
-import { foldState } from '../../src/db/collections/workpieces.ts';
 import { collectionDefinitions } from '../../src/db/schemas.ts';
 import { createWorkpieceHub } from '../../src/realtime/index.ts';
 import { createApi } from '../../src/routes/index.ts';
@@ -997,14 +996,8 @@ describe('the history of a workpiece', () => {
 });
 
 describe('a workpiece as a thing', () => {
-  it('describes it without the folded state, which belongs to loading', async () => {
+  it('describes it as it was created', async () => {
     const { workpieceId } = await setUp();
-    const id = new ObjectId(workpieceId);
-    await foldState(storage.db, {
-      workpieceId: id,
-      state: new Uint8Array(8),
-      upToUpdateId: new ObjectId(),
-    });
 
     const described = await request(server).get(`/workpieces/${workpieceId}`).set(as(bob));
 

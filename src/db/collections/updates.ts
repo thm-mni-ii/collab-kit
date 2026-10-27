@@ -3,7 +3,7 @@ import { Binary, ObjectId, type Db, type Filter, type FindCursor } from 'mongodb
 import type { CollectionDefinition } from '../apply.ts';
 import { authorOf, stampField, stampsSchema, type Author, type Stamp } from './pseudonyms.ts';
 
-/** One change to a workpiece as Yjs bytes plus who and when; never deleted, not even by a fold. */
+/** One change to a workpiece as Yjs bytes plus who and when; never deleted. */
 export interface UpdateRecord {
   _id: ObjectId;
   workpieceId: ObjectId;
@@ -95,28 +95,16 @@ export async function copyUpdates(
   return copies;
 }
 
-/** Changes after the given one (all without it), oldest first; _id keeps order with one writer. */
+/** Changes after since (all without it) up to and including until, oldest first by _id. */
 export async function readUpdatesSince(
   db: Db,
   workpieceId: ObjectId,
   since?: ObjectId,
+  until?: ObjectId,
 ): Promise<UpdateRecord[]> {
   return db
     .collection<UpdateRecord>('updates')
-    .find(after(workpieceId, since))
-    .sort({ _id: 1 })
-    .toArray();
-}
-
-/** Changes up to and including the given one, oldest first; the chain to an earlier state. */
-export async function readUpdatesUntil(
-  db: Db,
-  workpieceId: ObjectId,
-  until: ObjectId,
-): Promise<UpdateRecord[]> {
-  return db
-    .collection<UpdateRecord>('updates')
-    .find({ workpieceId, _id: { $lte: until } })
+    .find(between(workpieceId, since, until))
     .sort({ _id: 1 })
     .toArray();
 }
@@ -192,7 +180,7 @@ export async function summarizeUpdatesSince(
 ): Promise<UpdateSummary[]> {
   const found = db
     .collection<UpdateRecord>('updates')
-    .find<UpdateSummary>(after(workpieceId, since), {
+    .find<UpdateSummary>(between(workpieceId, since), {
       projection: { createdBy: 1, createdAt: 1, bytes: { $binarySize: '$bytes' }, anonymous: 1 },
     })
     .sort({ _id: 1 });
@@ -200,9 +188,17 @@ export async function summarizeUpdatesSince(
   return limit === undefined ? found.toArray() : found.limit(limit).toArray();
 }
 
-/** The changes of a workpiece after the given one, or all of them. */
-function after(workpieceId: ObjectId, since: ObjectId | undefined): Filter<UpdateRecord> {
-  return since === undefined ? { workpieceId } : { workpieceId, _id: { $gt: since } };
+/** The changes of a workpiece after since and up to until; either left out, without that bound. */
+function between(
+  workpieceId: ObjectId,
+  since: ObjectId | undefined,
+  until?: ObjectId,
+): Filter<UpdateRecord> {
+  const bounds = {
+    ...(since === undefined ? {} : { $gt: since }),
+    ...(until === undefined ? {} : { $lte: until }),
+  };
+  return Object.keys(bounds).length === 0 ? { workpieceId } : { workpieceId, _id: bounds };
 }
 
 /** The id of the newest change of a workpiece, or undefined while it has none. */

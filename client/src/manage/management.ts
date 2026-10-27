@@ -10,6 +10,7 @@ import { Store, type FormKind, type Tab } from './store.ts';
 import { formView, headView, type FormsView } from './views/forms.ts';
 import { groupView } from './views/groups.ts';
 import { roomView } from './views/rooms.ts';
+import { roomCount, workpieceView } from './views/workpieces.ts';
 
 /** What a tool sets, as properties and the lang attribute; the rest lives in the store. */
 export class Management extends LitElement implements ManagementOptions {
@@ -61,16 +62,25 @@ export class Management extends LitElement implements ManagementOptions {
       return nothing;
     }
     const { t } = this;
-    const { tab, failure } = this.store.state;
+    const { tab, failure, mayCreate } = this.store.state;
 
     return html`<div class="frame">
       <div class="bar" role="tablist">
         ${this.tabButton('rooms', t.rooms)} ${this.tabButton('groups', t.groups)}
+        ${mayCreate ? this.tabButton('workpieces', t.workpieces) : nothing}
       </div>
       ${failure === undefined ? nothing : html`<p class="error banner" role="alert">${failure}</p>`}
       <div class="body">
-        <div class="list">${this.listView(t)}</div>
-        <div class="detail">${tab === 'rooms' ? this.roomDetail(t) : this.groupDetail(t)}</div>
+        <div class="list">${tab === 'workpieces' ? this.workpieceList(t) : this.listView(t)}</div>
+        <div class="detail">
+          ${
+            tab === 'rooms'
+              ? this.roomDetail(t)
+              : tab === 'groups'
+                ? this.groupDetail(t)
+                : this.workpieceDetail(t)
+          }
+        </div>
       </div>
     </div>`;
   }
@@ -125,6 +135,53 @@ export class Management extends LitElement implements ManagementOptions {
           : nothing
       }
     `;
+  }
+
+  /** Every workpiece, forks under their source, and how many rooms each lies in. */
+  private workpieceList(t: Texts): TemplateResult {
+    const { store } = this;
+    const { loaded, selected } = store.state;
+    const entries = store.entries();
+
+    if (!loaded) {
+      return html`<p class="empty">${t.loading}</p>`;
+    }
+    if (entries.length === 0) {
+      return html`<p class="empty">${t.noWorkpiecesAtAll}</p>`;
+    }
+    return html`${entries.map(
+      ({ workpiece, fork }) =>
+        html`<button
+          class="item ${fork ? 'fork' : ''}"
+          aria-current=${workpiece._id === selected.workpieces}
+          @click=${() => void store.select(workpiece._id)}
+        >
+          <span class="name">${workpiece.name}</span>
+          <span class="sub">${roomCount(t, store.roomsOf(workpiece._id).length)}</span>
+        </button>`,
+    )}`;
+  }
+
+  private workpieceDetail(t: Texts): TemplateResult | typeof nothing {
+    const { store } = this;
+    const workpiece = store.workpiece();
+    if (workpiece === undefined) {
+      return nothing;
+    }
+    const { forkOf } = workpiece;
+
+    return workpieceView({
+      t,
+      workpiece,
+      source: forkOf === undefined ? undefined : store.state.workpieces.get(forkOf.id),
+      rooms: store.state.rooms,
+      groups: store.state.groups,
+      use: store.state.use,
+      names: store.state.names,
+      busy: store.state.busy,
+      putIn: (roomId) => void store.putIn(roomId, workpiece._id),
+      takeOut: (room) => void store.takeOut(room, workpiece._id),
+    });
   }
 
   private roomDetail(t: Texts): TemplateResult | typeof nothing {

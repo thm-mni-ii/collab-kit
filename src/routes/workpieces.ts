@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ObjectId, type Db } from 'mongodb';
+import type { Logger } from 'pino';
 
 import { may, maySee, workpiecesVisibleTo } from '../auth/access.ts';
 import { readerOf, stampsFor } from '../auth/anonymity.ts';
@@ -12,7 +13,9 @@ import type { Actor } from '../model/actor.ts';
 import {
   forkWorkpiece,
   mergeWorkpiece,
+  readDocAt,
   readStateAt,
+  unitsIn,
   type WorkpieceHub,
 } from '../realtime/index.ts';
 import { asCount, asObject, asObjectId, asText, asUnits } from '../utils/input.ts';
@@ -23,7 +26,7 @@ import { actorOf, bodyOf, fail, guard, idOf, requireId, unusableField } from './
 const WORKPIECES = { placeOf: itself('workpiece') };
 
 /** The workpiece as a thing; typing runs over the WebSocket, here only a merge writes into one. */
-export function workpieceRoutes(db: Db, hub: WorkpieceHub): Router {
+export function workpieceRoutes(db: Db, hub: WorkpieceHub, logger: Logger): Router {
   const routes = Router();
 
   routes.param('id', requireId('workpiece'));
@@ -180,12 +183,43 @@ export function workpieceRoutes(db: Db, hub: WorkpieceHub): Router {
       return fail(response, 404, 'unknown change');
     }
 
-    const { state, upToUpdateId } = await readStateAt(db, id, at);
+    const { state, upToUpdateId } = await readStateAt(db, logger, id, at);
     // Which change the state reaches, so the tool knows what it holds.
     if (upToUpdateId !== undefined) {
       response.set('X-Up-To-Update-Id', upToUpdateId.toHexString());
     }
     response.type('application/octet-stream').send(Buffer.from(state));
+  });
+
+  /** The same state as JSON, only what the containers the workpiece named hold; no Yjs needed. */
+  routes.get('/workpieces/:id/units', seeing, async (request, response) => {
+    const at = asObjectId(request.query['at']);
+
+    const unusable = unusableField(request.query, { at });
+    if (unusable !== undefined) {
+      return fail(response, 400, `${unusable} is unusable`);
+    }
+
+    const id = idOf(request);
+    if (at !== undefined && !(await isUpdateOf(db, id, at))) {
+      return fail(response, 404, 'unknown change');
+    }
+
+    const workpiece = await findWorkpiece(db, id);
+    if (workpiece === null) {
+      return fail(response, 404, 'unknown workpiece');
+    }
+
+    // Read straight from the rebuilt doc, so the state is not encoded and decoded once more.
+    const { doc, upToUpdateId } = await readDocAt(db, logger, id, at);
+    try {
+      response.json({
+        ...defined({ upToUpdateId }),
+        containers: unitsIn(doc, workpiece.units),
+      });
+    } finally {
+      doc.destroy();
+    }
   });
 
   /** Names this moment; reason is the only place in the model for the why of a change. */

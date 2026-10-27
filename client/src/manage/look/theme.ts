@@ -61,7 +61,7 @@ export const styles = css`
   }
   .body {
     display: grid;
-    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
     min-height: 320px;
   }
   .list {
@@ -144,6 +144,14 @@ export const styles = css`
     background: var(--surface-alt);
     color: var(--text);
   }
+  .item.fork {
+    padding-left: 24px;
+  }
+  .sub {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
   .head,
   .row {
     display: flex;
@@ -173,7 +181,8 @@ export const styles = css`
     border-radius: calc(var(--radius) - 2px);
     color: var(--text-muted);
   }
-  .chip[aria-pressed='true'] {
+  .chip[aria-pressed='true'],
+  .chip.held {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--on-accent);
@@ -210,6 +219,9 @@ export const styles = css`
   .form input,
   .form select {
     flex: 1;
+  }
+  .list .form input {
+    flex-basis: 100%;
   }
   .confirm p {
     flex-basis: 100%;

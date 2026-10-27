@@ -276,7 +276,7 @@ describe('presence', () => {
     const first = await hub.join(workpieceId, alice);
     await hub.join(workpieceId, bob);
 
-    // A change, so each of the two releases has a fold to write and takes a moment.
+    // A change, so each of the two releases has a stored change to wait for.
     first.doc.transact(() => first.doc.getText('t').insert(0, 'x'), alice);
     expect(
       await waitFor(async () => (await readUpdatesSince(storage.db, workpieceId)).length === 1),

@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { Binary, ObjectId } from 'mongodb';
+import { ObjectId } from 'mongodb';
 import pino from 'pino';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -455,13 +455,6 @@ describe('rooms and workpieces under grants', () => {
     const single = created.body._id as string;
     const readers = await group(['bob']);
     await grant(readers, { kind: 'workpiece', id: single }, ['see']);
-    // Folded once, so the list has a state it must leave out.
-    await storage.db.collection('workpieces').updateOne(
-      { _id: new ObjectId(single) },
-      {
-        $set: { fold: { state: new Binary(Buffer.from([0, 0])), upToUpdateId: new ObjectId() } },
-      },
-    );
     const listed = async (token: string) =>
       (await request(server).get('/workpieces').set(as(token))).body as { _id: string }[];
     const ids = async (token: string) => (await listed(token)).map((entry) => entry._id);
@@ -471,7 +464,6 @@ describe('rooms and workpieces under grants', () => {
     expect(await ids(bob)).toContain(single);
     expect(await ids(bob)).not.toContain(workpieceId);
     expect(await ids(dozent)).toEqual(expect.arrayContaining([workpieceId, single]));
-    expect((await listed(bob)).find((entry) => entry._id === single)).not.toHaveProperty('fold');
   });
 
   it('creates a workpiece in a room with edit there, outside every room with edit everywhere', async () => {

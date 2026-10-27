@@ -1,5 +1,4 @@
 import { ObjectId } from 'mongodb';
-import * as Y from 'yjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { applyDefinitions } from '../../src/db/apply.ts';
@@ -9,8 +8,6 @@ import {
   createWorkpiece,
   workpieceExists,
   findWorkpiece,
-  findWorkpieceWithFold,
-  foldState,
 } from '../../src/db/collections/workpieces.ts';
 
 const uri = process.env['MONGODB_URI'];
@@ -32,19 +29,12 @@ afterAll(async () => {
   await storage.close();
 });
 
-/** Plays the tool: the service itself never touches a Yjs type. */
-function typed(text: string): Uint8Array {
-  const doc = new Y.Doc();
-  doc.getText('anything').insert(0, text);
-  return Y.encodeStateAsUpdate(doc);
-}
-
 describe('workpieces', () => {
-  it('is born empty, without a state and without a shortcut', async () => {
+  it('is born empty, without a state', async () => {
     const created = await createWorkpiece(storage.db, { name: 'Entwurf', createdBy: 'alice' });
 
     expect(created).toMatchObject({ name: 'Entwurf', createdBy: 'alice', contract: {} });
-    expect(created.fold).toBeUndefined();
+    expect(await findWorkpiece(storage.db, created._id)).toEqual(created);
   });
 
   it('keeps the contract of the tool untouched', async () => {
@@ -69,63 +59,5 @@ describe('workpieces', () => {
 
     await expect(workpieceExists(storage.db, created._id)).resolves.toBe(true);
     await expect(workpieceExists(storage.db, new ObjectId())).resolves.toBe(false);
-  });
-});
-
-describe('folding', () => {
-  it('writes the shortcut and returns the bytes unchanged', async () => {
-    const created = await createWorkpiece(storage.db, { name: 'Entwurf', createdBy: 'alice' });
-    const upToUpdateId = new ObjectId();
-
-    await expect(
-      foldState(storage.db, { workpieceId: created._id, state: typed('hallo welt'), upToUpdateId }),
-    ).resolves.toBe(true);
-
-    const stored = await findWorkpieceWithFold(storage.db, created._id);
-    const read = new Y.Doc();
-    Y.applyUpdate(read, new Uint8Array(stored!.fold!.state.buffer));
-
-    expect(read.getText('anything').toString()).toBe('hallo welt');
-    expect(stored?.fold?.upToUpdateId).toEqual(upToUpdateId);
-  });
-
-  it('leaves the folded state out of findWorkpiece, which only checks and describes', async () => {
-    const created = await createWorkpiece(storage.db, { name: 'Entwurf', createdBy: 'alice' });
-    const upToUpdateId = new ObjectId();
-    await foldState(storage.db, { workpieceId: created._id, state: typed('gross'), upToUpdateId });
-
-    const found = await findWorkpiece(storage.db, created._id);
-
-    expect(found).toEqual(created);
-    expect(found).not.toHaveProperty('fold');
-  });
-
-  it('refuses to push an older state over a newer one', async () => {
-    const created = await createWorkpiece(storage.db, { name: 'Entwurf', createdBy: 'alice' });
-    const first = new ObjectId();
-
-    await foldState(storage.db, {
-      workpieceId: created._id,
-      state: typed('erst'),
-      upToUpdateId: first,
-    });
-
-    // Somebody who still believes the workpiece was never folded.
-    await expect(
-      foldState(storage.db, {
-        workpieceId: created._id,
-        state: typed('daneben'),
-        upToUpdateId: new ObjectId(),
-      }),
-    ).resolves.toBe(false);
-
-    await expect(
-      foldState(storage.db, {
-        workpieceId: created._id,
-        state: typed('danach'),
-        upToUpdateId: new ObjectId(),
-        expected: first,
-      }),
-    ).resolves.toBe(true);
   });
 });

@@ -10,12 +10,7 @@ import {
 } from '../../db/collections/events.ts';
 import { copyPseudonyms, pseudonymOf } from '../../db/collections/pseudonyms.ts';
 import { addToRoom } from '../../db/collections/rooms.ts';
-import {
-  copyUpdates,
-  readUpdatesSince,
-  readUpdatesUntil,
-  type UpdateRecord,
-} from '../../db/collections/updates.ts';
+import { copyUpdates, readUpdatesSince, type UpdateRecord } from '../../db/collections/updates.ts';
 import {
   createWorkpiece,
   findWorkpiece,
@@ -56,7 +51,7 @@ export async function forkWorkpiece(
 
   // Up to the point asked for, or what is stored by now, a change still being written included.
   const at = input.at ?? (await hub.storedUpTo(sourceId));
-  const rows = at === undefined ? [] : await readUpdatesUntil(db, sourceId, at);
+  const rows = at === undefined ? [] : await readUpdatesSince(db, sourceId, undefined, at);
 
   // The history first: should it break off, it lies there without a workpiece nobody sees.
   const id = new ObjectId();
