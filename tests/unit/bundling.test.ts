@@ -134,7 +134,7 @@ describe('bundling removals until a pause', () => {
     const { tracing, written } = noting();
     const bundling = createBundling(tracing, { pause: PAUSE, limit: LIMIT });
     const workpiece = target();
-    const hidden: Author = { actorId: 'bob', as: 'anon-0042' };
+    const hidden: Author = { actorId: 'bob', as: 'anonymous-0042' };
 
     bundling.add(workpiece, bob, letter(0), new ObjectId(), new ObjectId());
     bundling.add(workpiece, hidden, letter(1), new ObjectId(), new ObjectId());

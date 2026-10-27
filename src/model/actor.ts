@@ -9,7 +9,7 @@ export interface Actor {
 }
 
 /** What every pseudonym begins with; a key that does is never taken as a person's. */
-export const PSEUDONYM_PREFIX = 'anon-';
+export const PSEUDONYM_PREFIX = 'anonymous-';
 
 /** Whether a key looks like one the service makes up for a person writing anonymously. */
 export function isPseudonym(key: string): boolean {

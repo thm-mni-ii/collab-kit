@@ -75,7 +75,7 @@ describe('createTokenCheck', () => {
   });
 
   it('refuses a key like a pseudonym, so nobody passes for someone writing anonymously', async () => {
-    await expect(check(sign({ sub: 'anon-1234' }, { expiresIn: '15m' }))).rejects.toThrowError(
+    await expect(check(sign({ sub: 'anonymous-1234' }, { expiresIn: '15m' }))).rejects.toThrowError(
       'token rejected',
     );
   });
