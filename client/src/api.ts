@@ -328,6 +328,20 @@ export interface State {
   readonly upToUpdateId?: string;
 }
 
+/** Which state to read units from, and the map that holds them. */
+export interface UnitsAtOptions {
+  /** The change after which; left out, the newest. */
+  readonly at?: string;
+  /** The top Y.Map holding one value per unit, as for open; left out, units. */
+  readonly map?: string;
+}
+
+/** The units of a stored state by key, and the change it reaches. */
+export interface UnitsAt<Value = unknown> {
+  readonly units: ReadonlyMap<string, Value>;
+  readonly upToUpdateId?: string;
+}
+
 /** The newest trace of one person. */
 export interface Activity {
   readonly actorId: string;
@@ -525,6 +539,8 @@ export interface WorkpieceRoutes {
   activity(id: string): Promise<Named<Activity>[]>;
   /** The state after the change at, or the newest. */
   state(id: string, at?: string): Promise<State>;
+  /** The units of that state without Yjs; throws 400 if the workpiece did not name the map. */
+  unitsAt<Value = unknown>(id: string, options?: UnitsAtOptions): Promise<UnitsAt<Value>>;
   checkpoint(id: string, checkpoint?: NewCheckpoint): Promise<Named<CollabEvent>>;
   fork(id: string, fork: NewFork): Promise<Named<Workpiece>>;
   merge(id: string, merge: NewMerge): Promise<Named<CollabEvent>>;
