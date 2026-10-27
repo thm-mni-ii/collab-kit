@@ -16,11 +16,7 @@ import { createGroup } from '../../src/db/collections/groups.ts';
 import { addToRoom, createRoom } from '../../src/db/collections/rooms.ts';
 import type { SnapshotRecord } from '../../src/db/collections/snapshots.ts';
 import { appendUpdate, readUpdatesSince } from '../../src/db/collections/updates.ts';
-import {
-  createWorkpiece,
-  findWorkpieceWithFold,
-  type UnitContainer,
-} from '../../src/db/collections/workpieces.ts';
+import { createWorkpiece, type UnitContainer } from '../../src/db/collections/workpieces.ts';
 import { collectionDefinitions } from '../../src/db/schemas.ts';
 import type { Right } from '../../src/model/right.ts';
 import {
@@ -603,7 +599,7 @@ describe('merging', () => {
     await bob.close();
   });
 
-  it('loads a closed target and lets go of it again, folded', async () => {
+  it('loads a closed target and lets go of it again', async () => {
     const roomId = await team();
     const groupWork = await workpieceIn(roomId);
     const own = await forkInto('alice', groupWork, roomId);
@@ -615,8 +611,7 @@ describe('merging', () => {
     const merged = await mergeFrom('alice', groupWork, own);
 
     expect(gateway.countFor(groupWork)).toBe(0);
-    const folded = await findWorkpieceWithFold(storage.db, groupWork);
-    expect(folded?.fold?.upToUpdateId.toHexString()).toBe(merged.at);
+    expect((await changesOf(groupWork)).at(-1)?._id.toHexString()).toBe(merged.at);
     expect(await textOf(groupWork)).toBe('allein');
   });
 
@@ -641,13 +636,8 @@ describe('merging', () => {
     expect(merged.body.detail.count).toBe(200);
     await closed(groupWork);
     expect(await textOf(groupWork)).toBe('x'.repeat(200));
-    expect(
-      await waitFor(
-        async () =>
-          (await findWorkpieceWithFold(storage.db, groupWork))?.fold?.upToUpdateId.toHexString() ===
-          merged.body.at,
-      ),
-    ).toBe(true);
+    expect(await changesOf(groupWork)).toHaveLength(200);
+    expect((await changesOf(groupWork)).at(-1)?._id.toHexString()).toBe(merged.body.at);
   });
 
   it('loses nothing when the last one leaves just as a merge begins', async () => {

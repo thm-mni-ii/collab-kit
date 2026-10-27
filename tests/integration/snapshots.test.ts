@@ -13,7 +13,10 @@ import {
 import { appendUpdate, readUpdatesSince } from '../../src/db/collections/updates.ts';
 import { createWorkpiece } from '../../src/db/collections/workpieces.ts';
 import { collectionDefinitions } from '../../src/db/schemas.ts';
-import { readStateAt, SNAPSHOT_EVERY } from '../../src/realtime/hub/persistence.ts';
+import { loadWorkpiece, readStateAt, SNAPSHOT_EVERY } from '../../src/realtime/hub/persistence.ts';
+import { createWorkpieceHub, type Connection } from '../../src/realtime/index.ts';
+import type { WorkpieceHub } from '../../src/realtime/hub/types.ts';
+import { waitFor } from './yjs-client.ts';
 
 const uri = process.env['MONGODB_URI'];
 if (uri === undefined || uri === '') {
@@ -24,15 +27,26 @@ const database = `collab_kit_snapshots_${Date.now()}_${Math.random().toString(36
 const silent = pino({ level: 'silent' });
 
 let storage: Storage;
+let hub: WorkpieceHub;
 
 beforeAll(async () => {
   storage = await connect({ uri, database });
   await applyDefinitions(storage.db, collectionDefinitions);
+  hub = createWorkpieceHub({ db: storage.db, logger: silent });
 });
 
 afterAll(async () => {
+  await hub.close();
   await storage.db.dropDatabase();
   await storage.close();
+});
+
+/** A connection without a socket, to drive the hub directly. */
+const quiet = (actorId: string): Connection => ({
+  actor: { actorId },
+  wantsEvents: false,
+  send: () => {},
+  close: () => {},
 });
 
 /** A workpiece without any change yet. */
@@ -90,6 +104,10 @@ function expectSame(actual: Y.Doc, expected: Y.Doc): void {
   expect(actual.getMap('cells').toJSON()).toEqual(expected.getMap('cells').toJSON());
 }
 
+/** How many changes of a workpiece are stored. */
+const storedOf = (workpieceId: ObjectId) =>
+  storage.db.collection('updates').countDocuments({ workpieceId });
+
 /** The snapshots of a workpiece, oldest first. */
 const snapshotsOf = (workpieceId: ObjectId) =>
   storage.db
@@ -121,7 +139,7 @@ describe('rebuilding a state', () => {
     expectSame(await given(workpieceId), await replayed(workpieceId));
   });
 
-  it('catches up the snapshots a long way lacks, each holding exactly up to its change', async () => {
+  it('catches up the snapshots a long way lacks, each exactly up to its change', async () => {
     const workpieceId = await freshWorkpiece();
     const tool = toolDoc(1);
     await storeFrom(workpieceId, tool, cellChanges(tool, 2 * SNAPSHOT_EVERY + 50));
@@ -148,7 +166,7 @@ describe('rebuilding a state', () => {
     /* eslint-enable no-await-in-loop */
   });
 
-  it('keeps a deleted container as a frame, so a late change in it still finds its place', async () => {
+  it('keeps a deleted container as a frame, so a late change in it finds its place', async () => {
     const workpieceId = await freshWorkpiece();
     const tool = toolDoc(1);
     const late = toolDoc(2);
@@ -180,6 +198,64 @@ describe('rebuilding a state', () => {
     expect(renamed).not.toHaveLength(0);
     expect(renamed.every((struct) => struct instanceof Y.Item)).toBe(true);
     expectSame(await given(workpieceId), await replayed(workpieceId));
+  });
+});
+
+describe('the hub', () => {
+  it('lays one after every 200 stored changes, holding nothing beyond its change', async () => {
+    const workpieceId = await freshWorkpiece();
+    const alice = quiet('alice');
+    const { doc } = await hub.join(workpieceId, alice);
+
+    // In one go, so the Y.Doc holds every change before the first of them is stored.
+    const count = 2 * SNAPSHOT_EVERY + 20;
+    for (let index = 0; index < count; index += 1) {
+      doc.transact(() => doc.getMap('cells').set(`c${index % 30}`, index), alice);
+    }
+    expect(await waitFor(async () => (await storedOf(workpieceId)) === count, 10_000)).toBe(true);
+    expect(await waitFor(async () => (await snapshotsOf(workpieceId)).length === 2)).toBe(true);
+
+    // Each exactly up to its change, from the stored chain, though the Y.Doc was further.
+    const rows = await readUpdatesSince(storage.db, workpieceId);
+    expect(rows).toHaveLength(count);
+    const snapshots = await snapshotsOf(workpieceId);
+    expect(snapshots.map((snapshot) => snapshot.upToUpdateId)).toEqual([
+      rows[SNAPSHOT_EVERY - 1]!._id,
+      rows[2 * SNAPSHOT_EVERY - 1]!._id,
+    ]);
+    /* eslint-disable no-await-in-loop */
+    for (const snapshot of snapshots) {
+      const laid = new Y.Doc({ gc: false });
+      Y.applyUpdate(laid, new Uint8Array(snapshot.state.buffer));
+      expectSame(laid, await replayed(workpieceId, snapshot.upToUpdateId));
+    }
+    /* eslint-enable no-await-in-loop */
+
+    await hub.leave(workpieceId, alice);
+  });
+
+  it('loads from the newest snapshot and the changes after it', async () => {
+    const workpieceId = await freshWorkpiece();
+    const alice = quiet('alice');
+    const held = await hub.join(workpieceId, alice);
+    const count = SNAPSHOT_EVERY + 30;
+    for (let index = 0; index < count; index += 1) {
+      held.doc.transact(() => held.doc.getMap('cells').set(`c${index % 30}`, index), alice);
+    }
+    expect(await waitFor(async () => (await storedOf(workpieceId)) === count, 10_000)).toBe(true);
+    expect(await waitFor(async () => (await snapshotsOf(workpieceId)).length === 1)).toBe(true);
+    await hub.leave(workpieceId, alice);
+
+    // Counted from the snapshot, it holds what the whole chain holds.
+    const { doc, stored } = await loadWorkpiece(storage.db, silent, workpieceId);
+    const rows = await readUpdatesSince(storage.db, workpieceId);
+    expect(stored.updatesSinceSnapshot).toBe(count - SNAPSHOT_EVERY);
+    expect(stored.lastUpdateId).toEqual(rows.at(-1)!._id);
+    expectSame(doc, await replayed(workpieceId));
+
+    const again = await hub.join(workpieceId, alice);
+    expectSame(again.doc, await replayed(workpieceId));
+    await hub.leave(workpieceId, alice);
   });
 });
 

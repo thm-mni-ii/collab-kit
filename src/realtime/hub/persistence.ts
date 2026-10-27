@@ -2,11 +2,7 @@ import type { Binary, Db, ObjectId } from 'mongodb';
 import type { Logger } from 'pino';
 import * as Y from 'yjs';
 
-import {
-  findWorkpieceWithFold,
-  foldState,
-  type UnitContainer,
-} from '../../db/collections/workpieces.ts';
+import { findWorkpiece, type UnitContainer } from '../../db/collections/workpieces.ts';
 import { latestSnapshot, storeSnapshot } from '../../db/collections/snapshots.ts';
 import {
   appendUpdate,
@@ -21,12 +17,12 @@ export interface Stored {
   readonly workpieceId: ObjectId;
   /** Writes run one after another, so the stored order matches the order of arrival. */
   queue: Promise<void>;
-  /** The newest update written for this workpiece, the cut for the next folding. */
+  /** The newest update written for this workpiece, where the next snapshot ends. */
   lastUpdateId?: ObjectId;
-  /** What fold.upToUpdateId holds in the database, as far as this process knows. */
-  foldedUpToUpdateId?: ObjectId;
-  /** Updates stored since a fold was last tried, so a failing fold is not retried each time. */
-  updatesSinceFoldAttempt: number;
+  /** Stored since a snapshot was last laid or tried, so a failure is not retried at once. */
+  updatesSinceSnapshot: number;
+  /** Whether a snapshot is being made, so there is at most one per workpiece at a time. */
+  snapshotting: boolean;
 }
 
 /** How many stored changes lie between two snapshots, so rebuilding a state replays no more. */
@@ -51,7 +47,7 @@ export async function loadWorkpiece(
   readonly stored: Stored;
   readonly units: readonly UnitContainer[];
 }> {
-  const record = await findWorkpieceWithFold(db, workpieceId);
+  const record = await findWorkpiece(db, workpieceId);
 
   if (record === null) {
     throw new Error(`unknown workpiece ${workpieceId.toHexString()}`);
@@ -59,15 +55,13 @@ export async function loadWorkpiece(
 
   const { doc, upToUpdateId, sinceSnapshot } = await rebuild(db, logger, workpieceId);
 
-  // How far it is stored: the newest change, and how far the fold reaches.
+  // How far it is stored: the newest change, and how many came after the last snapshot.
   const stored: Stored = {
     workpieceId,
     queue: Promise.resolve(),
-    updatesSinceFoldAttempt: sinceSnapshot,
-    ...defined({
-      lastUpdateId: upToUpdateId,
-      foldedUpToUpdateId: record.fold?.upToUpdateId,
-    }),
+    updatesSinceSnapshot: sinceSnapshot,
+    snapshotting: false,
+    ...defined({ lastUpdateId: upToUpdateId }),
   };
 
   return { doc, stored, units: record.units };
@@ -166,7 +160,7 @@ export function enqueue<T>(stored: Pick<Stored, 'queue'>, work: () => T | Promis
   return run;
 }
 
-/** Keeps one change, counts it towards the next folding and gives its id. Runs inside the queue. */
+/** Keeps one change, counts it towards the next snapshot, gives its id. Runs inside the queue. */
 export async function storeUpdate(
   db: Db,
   stored: Stored,
@@ -184,9 +178,9 @@ export async function storeUpdate(
     anonymous: stampsOf([author]),
   });
 
-  // The newest stored change is the cut for the next fold.
+  // The newest stored change is where the next snapshot ends.
   stored.lastUpdateId = record._id;
-  stored.updatesSinceFoldAttempt += 1;
+  stored.updatesSinceSnapshot += 1;
   return record._id;
 }
 
@@ -205,32 +199,14 @@ export async function deleterOf(
   return undefined;
 }
 
-/** Writes the state from memory as the new shortcut; runs in the queue or after it drained. */
-export async function foldNow(db: Db, stored: Stored, doc: Y.Doc): Promise<boolean> {
-  const upToUpdateId = stored.lastUpdateId;
-
-  // Nothing stored yet, or nothing new since the last fold.
-  if (upToUpdateId === undefined) {
-    return false;
-  }
-  if (stored.foldedUpToUpdateId !== undefined && upToUpdateId.equals(stored.foldedUpToUpdateId)) {
-    return false;
-  }
-
-  // Counted from the attempt, so a fold that keeps failing waits as long as the first one did.
-  stored.updatesSinceFoldAttempt = 0;
-
-  // May hold changes not stored yet; they lie beyond the cut, and applying twice is harmless.
-  const written = await foldState(db, {
-    workpieceId: stored.workpieceId,
-    state: Y.encodeStateAsUpdate(doc),
-    upToUpdateId,
-    ...defined({ expected: stored.foldedUpToUpdateId }),
-  });
-
-  // Only a fold that was written moves the mark; losing the race to another changes nothing.
-  if (written) {
-    stored.foldedUpToUpdateId = upToUpdateId;
-  }
-  return written;
+/** Lays the snapshot due up to this stored change, from the database, never from a Y.Doc. */
+export async function snapshotUpTo(
+  db: Db,
+  logger: Logger,
+  workpieceId: ObjectId,
+  upTo: ObjectId,
+): Promise<void> {
+  // Rebuilding up to it keeps the snapshot it passes, as reading does.
+  const { doc } = await rebuild(db, logger, workpieceId, upTo);
+  doc.destroy();
 }

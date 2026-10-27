@@ -3,7 +3,7 @@ import { Binary, ObjectId, type Db, type Filter, type FindCursor } from 'mongodb
 import type { CollectionDefinition } from '../apply.ts';
 import { authorOf, stampField, stampsSchema, type Author, type Stamp } from './pseudonyms.ts';
 
-/** One change to a workpiece as Yjs bytes plus who and when; never deleted, not even by a fold. */
+/** One change to a workpiece as Yjs bytes plus who and when; never deleted. */
 export interface UpdateRecord {
   _id: ObjectId;
   workpieceId: ObjectId;
@@ -95,7 +95,7 @@ export async function copyUpdates(
   return copies;
 }
 
-/** Changes after since (all without it) up to and including until, oldest first; _id keeps order. */
+/** Changes after since (all without it) up to and including until, oldest first by _id. */
 export async function readUpdatesSince(
   db: Db,
   workpieceId: ObjectId,
