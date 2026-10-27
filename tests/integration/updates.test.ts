@@ -166,7 +166,7 @@ describe('loading', () => {
       createdBy: 'alice',
     });
 
-    await expect(loadWorkpiece(storage.db, workpieceId)).rejects.toThrowError(
+    await expect(loadWorkpiece(storage.db, silent, workpieceId)).rejects.toThrowError(
       `update ${broken._id.toHexString()} cannot be applied`,
     );
   });
@@ -284,7 +284,7 @@ describe('folding', () => {
       clients: [],
       createdBy: 'carol',
     });
-    const { doc, stored } = await loadWorkpiece(storage.db, workpieceId);
+    const { doc, stored } = await loadWorkpiece(storage.db, silent, workpieceId);
 
     await expect(foldNow(storage.db, stored, doc)).resolves.toBe(true);
 
@@ -298,7 +298,7 @@ describe('folding', () => {
     const workpieceId = await freshWorkpiece();
 
     // Never a change, so there is no cut to write.
-    const empty = await loadWorkpiece(storage.db, workpieceId);
+    const empty = await loadWorkpiece(storage.db, silent, workpieceId);
     await expect(foldNow(storage.db, empty.stored, empty.doc)).resolves.toBe(false);
 
     await appendUpdate(storage.db, {
@@ -308,7 +308,7 @@ describe('folding', () => {
       createdBy: 'alice',
     });
 
-    const { doc, stored } = await loadWorkpiece(storage.db, workpieceId);
+    const { doc, stored } = await loadWorkpiece(storage.db, silent, workpieceId);
     await expect(foldNow(storage.db, stored, doc)).resolves.toBe(true);
     await expect(foldNow(storage.db, stored, doc)).resolves.toBe(false);
   });
@@ -321,7 +321,7 @@ describe('folding', () => {
       clients: [],
       createdBy: 'alice',
     });
-    const { doc, stored } = await loadWorkpiece(storage.db, workpieceId);
+    const { doc, stored } = await loadWorkpiece(storage.db, silent, workpieceId);
 
     // Applied but not stored yet, as between a message arriving and its turn in the queue.
     const pending: Uint8Array[] = [];
@@ -330,7 +330,7 @@ describe('folding', () => {
     await foldNow(storage.db, stored, doc);
     await storeUpdate(storage.db, stored, pending[0]!, { actorId: 'alice' });
 
-    const reloaded = await loadWorkpiece(storage.db, workpieceId);
+    const reloaded = await loadWorkpiece(storage.db, silent, workpieceId);
     expect(reloaded.doc.getText('t').toString()).toBe('vorher nachher');
   });
 
@@ -344,8 +344,8 @@ describe('folding', () => {
     });
 
     // Two working copies of the same workpiece, as two processes would hold them.
-    const first = await loadWorkpiece(storage.db, workpieceId);
-    const second = await loadWorkpiece(storage.db, workpieceId);
+    const first = await loadWorkpiece(storage.db, silent, workpieceId);
+    const second = await loadWorkpiece(storage.db, silent, workpieceId);
     const later: Uint8Array[] = [];
     second.doc.on('update', (update: Uint8Array) => later.push(update));
     second.doc.getText('t').insert(4, ' zwei');
@@ -359,7 +359,7 @@ describe('folding', () => {
     expect(record?.fold?.upToUpdateId).toEqual(first.stored.lastUpdateId);
     expect(second.stored.foldedUpToUpdateId).toBeUndefined();
 
-    const reloaded = await loadWorkpiece(storage.db, workpieceId);
+    const reloaded = await loadWorkpiece(storage.db, silent, workpieceId);
     expect(reloaded.doc.getText('t').toString()).toBe('eins zwei');
   });
 });

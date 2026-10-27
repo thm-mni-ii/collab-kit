@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ObjectId, type Db } from 'mongodb';
+import type { Logger } from 'pino';
 
 import { may, maySee, workpiecesVisibleTo } from '../auth/access.ts';
 import { readerOf, stampsFor } from '../auth/anonymity.ts';
@@ -23,7 +24,7 @@ import { actorOf, bodyOf, fail, guard, idOf, requireId, unusableField } from './
 const WORKPIECES = { placeOf: itself('workpiece') };
 
 /** The workpiece as a thing; typing runs over the WebSocket, here only a merge writes into one. */
-export function workpieceRoutes(db: Db, hub: WorkpieceHub): Router {
+export function workpieceRoutes(db: Db, hub: WorkpieceHub, logger: Logger): Router {
   const routes = Router();
 
   routes.param('id', requireId('workpiece'));
@@ -180,7 +181,7 @@ export function workpieceRoutes(db: Db, hub: WorkpieceHub): Router {
       return fail(response, 404, 'unknown change');
     }
 
-    const { state, upToUpdateId } = await readStateAt(db, id, at);
+    const { state, upToUpdateId } = await readStateAt(db, logger, id, at);
     // Which change the state reaches, so the tool knows what it holds.
     if (upToUpdateId !== undefined) {
       response.set('X-Up-To-Update-Id', upToUpdateId.toHexString());

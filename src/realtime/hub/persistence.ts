@@ -1,4 +1,5 @@
 import type { Binary, Db, ObjectId } from 'mongodb';
+import type { Logger } from 'pino';
 import * as Y from 'yjs';
 
 import {
@@ -6,11 +7,11 @@ import {
   foldState,
   type UnitContainer,
 } from '../../db/collections/workpieces.ts';
+import { latestSnapshot, storeSnapshot } from '../../db/collections/snapshots.ts';
 import {
   appendUpdate,
   readUpdatesDeleting,
   readUpdatesSince,
-  readUpdatesUntil,
 } from '../../db/collections/updates.ts';
 import { authorOf, stampsOf, type Author } from '../../db/collections/pseudonyms.ts';
 import { defined } from '../../utils/optional.ts';
@@ -28,9 +29,22 @@ export interface Stored {
   updatesSinceFoldAttempt: number;
 }
 
-/** Rebuilds the workpiece from its fold plus every later change, and says where its units lie. */
+/** How many stored changes lie between two snapshots, so rebuilding a state replays no more. */
+export const SNAPSHOT_EVERY = 200;
+
+/** A stored state rebuilt in memory, and how far it reaches. */
+interface Rebuilt {
+  readonly doc: Y.Doc;
+  /** The last change it holds; undefined while there is none. */
+  readonly upToUpdateId?: ObjectId;
+  /** Changes it holds after the last snapshot that was there or tried on the way. */
+  readonly sinceSnapshot: number;
+}
+
+/** Rebuilds the workpiece and says where its units lie; the newest state, as every state comes. */
 export async function loadWorkpiece(
   db: Db,
+  logger: Logger,
   workpieceId: ObjectId,
 ): Promise<{
   readonly doc: Y.Doc;
@@ -43,25 +57,15 @@ export async function loadWorkpiece(
     throw new Error(`unknown workpiece ${workpieceId.toHexString()}`);
   }
 
-  // Starts from the folded state, if there is one.
-  const doc = new Y.Doc({ gcFilter: keepsFrames });
-  if (record.fold !== undefined) {
-    applyStored(doc, record.fold.state, `the fold of workpiece ${workpieceId.toHexString()}`);
-  }
-
-  // Then every change the fold does not cover; never folded means the whole history.
-  const afterFold = await readUpdatesSince(db, workpieceId, record.fold?.upToUpdateId);
-  for (const row of afterFold) {
-    applyStored(doc, row.bytes, `update ${row._id.toHexString()}`);
-  }
+  const { doc, upToUpdateId, sinceSnapshot } = await rebuild(db, logger, workpieceId);
 
   // How far it is stored: the newest change, and how far the fold reaches.
   const stored: Stored = {
     workpieceId,
     queue: Promise.resolve(),
-    updatesSinceFoldAttempt: afterFold.length,
+    updatesSinceFoldAttempt: sinceSnapshot,
     ...defined({
-      lastUpdateId: afterFold.at(-1)?._id ?? record.fold?.upToUpdateId,
+      lastUpdateId: upToUpdateId,
       foldedUpToUpdateId: record.fold?.upToUpdateId,
     }),
   };
@@ -72,25 +76,68 @@ export async function loadWorkpiece(
 /** A stored state as one Yjs update: as it stood after the change at, or the newest one. */
 export async function readStateAt(
   db: Db,
+  logger: Logger,
   workpieceId: ObjectId,
   at?: ObjectId,
 ): Promise<{ readonly state: Uint8Array; readonly upToUpdateId?: ObjectId }> {
-  // The newest comes the way a workpiece loads, from the fold plus what came after it.
-  if (at === undefined) {
-    const { doc, stored } = await loadWorkpiece(db, workpieceId);
-    const state = Y.encodeStateAsUpdate(doc);
-    doc.destroy();
-    return { state, ...defined({ upToUpdateId: stored.lastUpdateId }) };
-  }
-
-  // The fold is mostly newer than the point asked for, so the chain is replayed from its start.
-  const doc = new Y.Doc();
-  for (const row of await readUpdatesUntil(db, workpieceId, at)) {
-    applyStored(doc, row.bytes, `update ${row._id.toHexString()}`);
-  }
+  const { doc, upToUpdateId } = await rebuild(db, logger, workpieceId, at);
   const state = Y.encodeStateAsUpdate(doc);
   doc.destroy();
-  return { state, upToUpdateId: at };
+  return { state, ...defined({ upToUpdateId }) };
+}
+
+/** The newest snapshot up to at, then the stored changes after it up to at; at left out, all. */
+async function rebuild(
+  db: Db,
+  logger: Logger,
+  workpieceId: ObjectId,
+  at?: ObjectId,
+): Promise<Rebuilt> {
+  const snapshot = await latestSnapshot(db, workpieceId, at);
+
+  // Starts from the snapshot, if there is one; deleted containers stay as frames throughout.
+  const doc = new Y.Doc({ gcFilter: keepsFrames });
+  if (snapshot !== null) {
+    applyStored(doc, snapshot.state, `snapshot ${snapshot._id.toHexString()}`);
+  }
+
+  // Then the changes after it, keeping the snapshot due after every SNAPSHOT_EVERY of them.
+  const rows = await readUpdatesSince(db, workpieceId, snapshot?.upToUpdateId, at);
+  const keeping: Promise<void>[] = [];
+  let sinceSnapshot = 0;
+  for (const row of rows) {
+    applyStored(doc, row.bytes, `update ${row._id.toHexString()}`);
+    sinceSnapshot += 1;
+    if (sinceSnapshot === SNAPSHOT_EVERY) {
+      keeping.push(keepSnapshot(db, logger, workpieceId, row._id, Y.encodeStateAsUpdate(doc)));
+      sinceSnapshot = 0;
+    }
+  }
+  await Promise.all(keeping);
+
+  return {
+    doc,
+    sinceSnapshot,
+    ...defined({ upToUpdateId: rows.at(-1)?._id ?? snapshot?.upToUpdateId }),
+  };
+}
+
+/** Stores a snapshot made from the stored chain; a failure is only logged, it costs only time. */
+async function keepSnapshot(
+  db: Db,
+  logger: Logger,
+  workpieceId: ObjectId,
+  upToUpdateId: ObjectId,
+  state: Uint8Array,
+): Promise<void> {
+  try {
+    await storeSnapshot(db, { workpieceId, upToUpdateId, state });
+  } catch (error) {
+    logger.error(
+      { err: error, workpieceId: workpieceId.toHexString() },
+      'could not keep a snapshot, rebuilding replays further until the next one',
+    );
+  }
 }
 
 /** Keeps a deleted map, text or array as a frame, so a later change in it still finds its place. */

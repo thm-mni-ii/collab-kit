@@ -15,6 +15,7 @@ describe('collectionDefinitions', () => {
       'groups',
       'pseudonyms',
       'rooms',
+      'snapshots',
       'tasks',
       'updates',
     ]);

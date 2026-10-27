@@ -88,7 +88,7 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
     connections: Set<Connection>,
     merges: MergeCount,
   ): Promise<Loaded> {
-    const { doc, stored, units } = await loadWorkpiece(options.db, workpieceId);
+    const { doc, stored, units } = await loadWorkpiece(options.db, options.logger, workpieceId);
     const announcedBy = new Map<number, Connection>();
     // Where the tool keeps its units, so each conflict hangs on the unit it hit.
     const containers = containersOf(units);
