@@ -104,6 +104,19 @@ async function fill(element: Management, text: string): Promise<void> {
   await settled(element);
 }
 
+/** Picks the workpiece of this name in the list. */
+async function pickWorkpiece(element: Management, name: string): Promise<HTMLElement> {
+  const item = [...rootOf(element).querySelectorAll<HTMLElement>('.item')].find(
+    (each) => each.querySelector('.name')?.textContent?.trim() === name,
+  );
+  if (item === undefined) {
+    throw new Error(`no workpiece "${name}"`);
+  }
+  item.click();
+  await settled(element);
+  return item;
+}
+
 /** Gives this group access to the shown room. */
 async function give(element: Management, groupId: string): Promise<void> {
   const select = rootOf(element).querySelector('select');
@@ -332,6 +345,55 @@ describe('<ck-management>', () => {
     await toggle(element, 'Team F', 'anonymous');
     const [open] = await alice.grants.list({ scope });
     expect(open?.anonymous).toBeUndefined();
+  });
+
+  it('shows the workpieces tab only with manage everywhere', async () => {
+    const room = await alice.rooms.create({ name: 'Übung 11' });
+    const team = await alice.groups.create({ name: 'Team H', members: ['bob'] });
+    await alice.grants.set({
+      groupId: team._id,
+      scope: { kind: 'room', id: room._id },
+      rights: ['see', 'manage'],
+    });
+
+    const element = await mount(bob);
+    expect(() => button(element, 'Werkstücke')).toThrow();
+  });
+
+  it('shows every workpiece with its rooms, the groups there and its traces, and moves it', async () => {
+    const first = await alice.rooms.create({ name: 'Ablage A' });
+    const second = await alice.rooms.create({ name: 'Ablage B' });
+    const workpiece = await alice.workpieces.create({ name: 'Modell', roomId: first._id });
+    await alice.workpieces.fork(workpiece._id, { name: 'Modell, Abzweig' });
+    await alice.workpieces.checkpoint(workpiece._id, { label: 'erster Stand' });
+    const team = await alice.groups.create({ name: 'Team I' });
+    await alice.grants.set({
+      groupId: team._id,
+      scope: { kind: 'room', id: first._id },
+      rights: ['see', 'edit'],
+    });
+
+    const element = await mount(alice);
+    await click(element, 'Werkstücke');
+    const fork = await pickWorkpiece(element, 'Modell, Abzweig');
+    expect(fork.classList.contains('fork')).toBe(true);
+    expect(textOf(element)).toContain('Abzweig von Modell');
+    expect(textOf(element)).toContain('Liegt in keinem Raum.');
+
+    const item = await pickWorkpiece(element, 'Modell');
+    expect(item.textContent).toContain('in einem Raum');
+    const text = textOf(element);
+    expect(text).toContain('Team I');
+    expect(text).toContain('Ablage A');
+    expect(text).toContain('Alice');
+
+    // In the second room too, then out of the first.
+    await give(element, second._id);
+    expect((await alice.rooms.get(second._id)).workpieces).toContain(workpiece._id);
+    expect(item.textContent).toContain('in 2 Räumen');
+    await click(element, 'Aus dem Raum nehmen');
+    expect((await alice.rooms.get(first._id)).workpieces).not.toContain(workpiece._id);
+    expect(textOf(element)).not.toContain('Team I');
   });
 
   it('tells a refusal of CK in its own words', async () => {

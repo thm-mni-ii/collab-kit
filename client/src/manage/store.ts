@@ -3,6 +3,7 @@
 import type { ReactiveControllerHost } from 'lit';
 
 import type {
+  Activity,
   ActorName,
   Grant,
   Group,
@@ -21,8 +22,8 @@ export const RIGHTS: readonly Right[] = ['see', 'speak', 'edit', 'plan', 'decide
 /** What one chip of a grant switches: a right, or whether its members write anonymously. */
 export type Switch = Right | 'anonymous';
 
-/** Which list is shown. */
-export type Tab = 'rooms' | 'groups';
+/** Which list is shown; workpieces only with manage everywhere. */
+export type Tab = 'rooms' | 'groups' | 'workpieces';
 
 /** What the one open form is for. */
 export type FormKind = 'room' | 'group' | 'workpiece' | 'member' | 'rename' | 'remove';
@@ -41,6 +42,21 @@ export interface Detail {
   readonly grants?: readonly Named<Grant>[];
 }
 
+/** Who reaches the shown workpiece through its rooms, and who left the last traces on it. */
+export interface Use {
+  readonly workpieceId: string;
+  /** The grants at every room it lies in. */
+  readonly grants: readonly Grant[];
+  /** The newest trace of each person, newest first. */
+  readonly activity: readonly Activity[];
+}
+
+/** A workpiece in the list, and whether it stands under its source as a fork. */
+export interface Entry {
+  readonly workpiece: Workpiece;
+  readonly fork: boolean;
+}
+
 /** Everything the element shows. */
 export interface State {
   readonly tab: Tab;
@@ -53,6 +69,7 @@ export interface State {
   readonly mayCreate: boolean;
   readonly selected: Readonly<Record<Tab, string | undefined>>;
   readonly detail: Detail | undefined;
+  readonly use: Use | undefined;
   readonly form: Form | undefined;
   readonly busy: boolean;
   /** What CK refused last, when no form was open to show it. */
@@ -68,8 +85,9 @@ const EMPTY: State = {
   workpieces: new Map(),
   names: {},
   mayCreate: false,
-  selected: { rooms: undefined, groups: undefined },
+  selected: { rooms: undefined, groups: undefined, workpieces: undefined },
   detail: undefined,
+  use: undefined,
   form: undefined,
   busy: false,
   failure: undefined,
@@ -126,8 +144,11 @@ export class Store {
       if (ck !== this.host.ck) {
         return;
       }
+      const mayCreate = everywhere.includes('manage');
       this.set({
-        mayCreate: everywhere.includes('manage'),
+        mayCreate,
+        // Another person may lack manage everywhere, which the workpieces take.
+        tab: mayCreate || this.state.tab !== 'workpieces' ? this.state.tab : 'rooms',
         rooms: byName(rooms),
         groups: byName(groups),
         workpieces: new Map(workpieces.map((workpiece) => [workpiece._id, workpiece])),
@@ -143,10 +164,10 @@ export class Store {
     await this.select(this.keptOrFirst(tab));
   }
 
-  /** Shows this room or group of the tab, with the rights and grants there. */
+  /** Shows this room, group or workpiece of the tab, with what holds there. */
   async select(id: string | undefined): Promise<void> {
     this.set({ selected: { ...this.state.selected, [this.state.tab]: id }, form: undefined });
-    await this.loadDetail();
+    await (this.state.tab === 'workpieces' ? this.loadUse() : this.loadDetail());
   }
 
   room(): Named<Room> | undefined {
@@ -155,6 +176,34 @@ export class Store {
 
   group(): Named<Group> | undefined {
     return this.state.groups.find((group) => group._id === this.state.selected.groups);
+  }
+
+  workpiece(): Workpiece | undefined {
+    const id = this.state.selected.workpieces;
+    return id === undefined ? undefined : this.state.workpieces.get(id);
+  }
+
+  /** Every workpiece by name, each fork under its source where the source is known. */
+  entries(): Entry[] {
+    const all = byName([...this.state.workpieces.values()]);
+    const sourceOf = (workpiece: Workpiece) =>
+      workpiece.forkOf !== undefined && this.state.workpieces.has(workpiece.forkOf.id)
+        ? workpiece.forkOf.id
+        : undefined;
+
+    // A fork of a fork stands under that fork, so none is lost.
+    const under = (id: string | undefined): Entry[] =>
+      all
+        .filter((workpiece) => sourceOf(workpiece) === id)
+        .flatMap((workpiece) =>
+          [{ workpiece, fork: id !== undefined }].concat(under(workpiece._id)),
+        );
+    return under(undefined);
+  }
+
+  /** The rooms this workpiece lies in. */
+  roomsOf(workpieceId: string): Named<Room>[] {
+    return this.state.rooms.filter((room) => room.workpieces.includes(workpieceId));
   }
 
   /** The detail of this room or group, if it is the one loaded. */
@@ -210,6 +259,15 @@ export class Store {
   async takeOut(room: Room, workpieceId: string): Promise<void> {
     await this.run(async () => {
       this.replaceRoom(await this.ck().rooms.removeWorkpiece(room._id, workpieceId));
+      await this.loadUseIfShown();
+    });
+  }
+
+  /** Puts a workpiece into one more room. */
+  async putIn(roomId: string, workpieceId: string): Promise<void> {
+    await this.run(async () => {
+      this.replaceRoom(await this.ck().rooms.addWorkpiece(roomId, workpieceId));
+      await this.loadUseIfShown();
     });
   }
 
@@ -378,6 +436,43 @@ export class Store {
     });
   }
 
+  /** The grants at the rooms of the shown workpiece, and the newest trace of each person on it. */
+  private async loadUse(): Promise<void> {
+    const ck = this.host.ck;
+    const workpiece = this.workpiece();
+    this.set({ use: undefined });
+    if (ck === undefined || workpiece === undefined) {
+      return;
+    }
+
+    await this.run(async () => {
+      const scopes = this.roomsOf(workpiece._id).map((room) => ({ kind: 'room', id: room._id }));
+      const [grants, activity] = await Promise.all([
+        Promise.all(scopes.map((scope) => ck.grants.list({ scope }))),
+        ck.workpieces.activity(workpiece._id),
+      ]);
+      // Another workpiece may have been picked meanwhile.
+      if (this.workpiece()?._id !== workpiece._id) {
+        return;
+      }
+      this.takeNames(...grants.flat(), ...activity);
+      this.set({
+        use: {
+          workpieceId: workpiece._id,
+          grants: grants.flat(),
+          activity: activity.toSorted((a, b) => b.at.localeCompare(a.at)),
+        },
+      });
+    });
+  }
+
+  /** After a workpiece moved, its rooms and their grants are others. */
+  private async loadUseIfShown(): Promise<void> {
+    if (this.state.tab === 'workpieces') {
+      await this.loadUse();
+    }
+  }
+
   /** Adds a member; a name from findPeople stands in until CK knows one itself. */
   private async addMember(group: Group, person: ActorName): Promise<void> {
     const changed = await this.ck().groups.addMember(group._id, person.actorId);
@@ -388,15 +483,22 @@ export class Store {
     this.set({ form: undefined });
   }
 
+  /** The shown room or group; a workpiece is no place that is renamed or deleted here. */
   private place(): Reference | undefined {
     const { tab, selected } = this.state;
     const id = selected[tab];
-    return id === undefined ? undefined : { kind: tab === 'rooms' ? 'room' : 'group', id };
+    return id === undefined || tab === 'workpieces'
+      ? undefined
+      : { kind: tab === 'rooms' ? 'room' : 'group', id };
   }
 
   private keptOrFirst(tab: Tab): string | undefined {
     const items: readonly { readonly _id: string }[] =
-      tab === 'rooms' ? this.state.rooms : this.state.groups;
+      tab === 'rooms'
+        ? this.state.rooms
+        : tab === 'groups'
+          ? this.state.groups
+          : this.entries().map((entry) => entry.workpiece);
     const kept = this.state.selected[tab];
     return items.some((item) => item._id === kept) ? kept : items[0]?._id;
   }
