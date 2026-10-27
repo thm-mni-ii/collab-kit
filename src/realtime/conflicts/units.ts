@@ -11,6 +11,38 @@ export function containersOf(units: readonly UnitContainer[]): Containers {
   return new Set(units.map((container) => pathKey(container.path)));
 }
 
+/** What one container holds in a state: its path and its values by key, as JSON. */
+export interface ContainerUnits {
+  readonly path: readonly string[];
+  readonly units: Record<string, unknown>;
+}
+
+/** What each container the workpiece names holds in this doc; one not there holds nothing. */
+export function unitsIn(doc: Y.Doc, units: readonly UnitContainer[]): ContainerUnits[] {
+  return units.map((container) => ({
+    path: container.path,
+    units: mapAt(doc, container.path)?.toJSON() ?? {},
+  }));
+}
+
+/** The map at a path of keys from a root type; none where a step leads to something else. */
+function mapAt(doc: Y.Doc, path: readonly string[]): Y.Map<unknown> | undefined {
+  const [root, ...below] = path;
+  if (root === undefined) {
+    return undefined;
+  }
+  // Down from the root type, key by key, as long as each holds a map.
+  let map = doc.getMap(root);
+  for (const key of below) {
+    const next: unknown = map.get(key);
+    if (!(next instanceof Y.Map)) {
+      return undefined;
+    }
+    map = next;
+  }
+  return map;
+}
+
 /** The unit of a piece: the key under which it, or what holds it, sits directly in a container. */
 export function unitOf(item: Y.Item, containers: Containers): string | undefined {
   // Up from the piece; the first container on the way is the innermost.

@@ -80,6 +80,17 @@ export async function readStateAt(
   return { state, ...defined({ upToUpdateId }) };
 }
 
+/** A stored state as a Y.Doc to read from, as with readStateAt; whoever asks destroys it. */
+export async function readDocAt(
+  db: Db,
+  logger: Logger,
+  workpieceId: ObjectId,
+  at?: ObjectId,
+): Promise<{ readonly doc: Y.Doc; readonly upToUpdateId?: ObjectId }> {
+  const { doc, upToUpdateId } = await rebuild(db, logger, workpieceId, at);
+  return { doc, ...defined({ upToUpdateId }) };
+}
+
 /** The newest snapshot up to at, then the stored changes after it up to at; at left out, all. */
 async function rebuild(
   db: Db,
