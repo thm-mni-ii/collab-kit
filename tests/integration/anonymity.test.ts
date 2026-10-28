@@ -41,7 +41,7 @@ const silent = pino({ level: 'silent' });
 /** How long removals here wait for more before they are written. */
 const PAUSE = 200;
 /** What every pseudonym looks like. */
-const PSEUDONYM = /^anon-\d{4}$/;
+const PSEUDONYM = /^anonymous-\d{4}$/;
 /** What the members of the room may do there, openly or not. */
 const WRITING: [Right, ...Right[]] = ['see', 'speak', 'edit', 'plan'];
 
@@ -439,11 +439,11 @@ describe('keys like a pseudonym', () => {
   it('are taken from no token, no member and no assignee', async () => {
     const { workpieceId, bobs } = await seminar();
 
-    expect((await request(server).get('/me').set(as('anon-1234'))).status).toBe(401);
+    expect((await request(server).get('/me').set(as('anonymous-1234'))).status).toBe(401);
     const member = await request(server)
       .post(`/groups/${bobs.toHexString()}/members`)
       .set(as('alice'))
-      .send({ actorId: 'anon-1234' });
+      .send({ actorId: 'anonymous-1234' });
     expect(member.status).toBe(400);
     const task = await request(server)
       .post('/tasks')
@@ -453,7 +453,7 @@ describe('keys like a pseudonym', () => {
         title: 'Falsch',
         state: 'open',
         anchor: { kind: 'workpiece', id: workpieceId.toHexString() },
-        assignees: [{ kind: 'actor', id: 'anon-1234' }],
+        assignees: [{ kind: 'actor', id: 'anonymous-1234' }],
       });
     expect(task.status).toBe(400);
   });

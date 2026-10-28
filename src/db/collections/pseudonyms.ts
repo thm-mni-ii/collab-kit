@@ -53,7 +53,7 @@ export const pseudonymsDefinition: CollectionDefinition = {
         properties: referenceProperties,
       },
       key: { bsonType: 'string' },
-      as: { bsonType: 'string', description: 'anon- and four digits' },
+      as: { bsonType: 'string', description: 'anonymous- and four digits' },
     },
   },
   indexes: [
@@ -150,7 +150,7 @@ export function stampField(stamps: readonly Stamp[]): { anonymous?: Stamp[] } {
   return stamps.length === 0 ? {} : { anonymous: [...stamps] };
 }
 
-/** anon- and four digits, drawn alike for everyone, so a pseudonym tells nothing of its key. */
+/** anonymous- and four digits, drawn alike for all, so a pseudonym tells nothing of its key. */
 function drawPseudonym(): string {
   return `${PSEUDONYM_PREFIX}${String(randomInt(10_000)).padStart(4, '0')}`;
 }

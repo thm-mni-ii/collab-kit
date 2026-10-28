@@ -7,6 +7,16 @@ const NODE_ENVS = ['development', 'test', 'production'] as const;
 
 export type NodeEnv = (typeof NODE_ENVS)[number];
 
+/** Where a source's token keys come from: one fixed key, or the key set it publishes. */
+export type TokenKey = { readonly fixed: string } | { readonly jwksUri: string };
+
+/** A service that signs its own tokens, found by its iss; always an RS, PS or ES algorithm. */
+export interface ServiceSource {
+  readonly issuer: string;
+  readonly algorithm: TokenAlgorithm;
+  readonly key: TokenKey;
+}
+
 export interface Config {
   readonly nodeEnv: NodeEnv;
   readonly port: number;
@@ -15,7 +25,7 @@ export interface Config {
   readonly mongoDb: string;
   readonly jwtAlgorithm: TokenAlgorithm;
   /** JWT_SECRET for an HS algorithm; for any other JWT_PUBLIC_KEY, or JWT_JWKS_URI to fetch the keys. */
-  readonly jwtKey: { readonly fixed: string } | { readonly jwksUri: string };
+  readonly jwtKey: TokenKey;
   /** Required `iss`; left out, every issuer passes. */
   readonly jwtIssuer?: string;
   /** Accepted `aud` values, one must match; left out, every audience passes. */
@@ -28,6 +38,8 @@ export interface Config {
   readonly labelClaim: string;
   /** TOP_CLAIM and TOP_VALUES: who may everything everywhere; left out, nobody. */
   readonly top?: TopClaim;
+  /** SERVICE_*: a second source, whose tokens a service signs itself; left out, there is none. */
+  readonly service?: ServiceSource;
   /** States the tool names a decision, so setting one takes decide; left out, none does. */
   readonly decisionStates?: readonly string[];
   /** Largest WebSocket message; left out, the gateway keeps its own default. */
@@ -73,7 +85,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
   }
 
-  const jwtKey = readTokenKey(env, jwtAlgorithm, problems);
+  const jwtKey = readTokenKey(env, 'JWT', jwtAlgorithm, problems);
 
   if (nodeEnv === 'production' && 'fixed' in jwtKey && jwtKey.fixed === PLACEHOLDER_SECRET) {
     const name = usesSharedSecret(jwtAlgorithm) ? 'JWT_SECRET' : 'JWT_PUBLIC_KEY';
@@ -91,6 +103,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const allowedOrigins = optionalOrigins(env, problems);
   const jwtIssuer = optionalValue(env, 'JWT_ISSUER');
   const jwtAudience = optionalList(env, 'JWT_AUDIENCE');
+  const service = readService(env, jwtIssuer, problems);
   const top = readTop(env, problems);
   const decisionStates = optionalList(env, 'DECISION_STATES');
 
@@ -118,6 +131,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
       maxAwarenessBytes,
       allowedOrigins,
       top,
+      service,
       decisionStates,
     }),
   };
@@ -133,37 +147,71 @@ function optionalValue(env: NodeJS.ProcessEnv, name: string): string | undefined
   return value === '' ? undefined : value;
 }
 
-/** Where the token keys come from: one fixed key, or the key set the issuing tool publishes. */
+/** Where a source's token keys come from: one fixed key, or the key set it publishes. */
 function readTokenKey(
   env: NodeJS.ProcessEnv,
+  prefix: 'JWT' | 'SERVICE',
   algorithm: string,
   problems: string[],
-): Config['jwtKey'] {
-  const jwksUri = optionalValue(env, 'JWT_JWKS_URI');
+): TokenKey {
+  const jwksUri = optionalValue(env, `${prefix}_JWKS_URI`);
 
   if (usesSharedSecret(algorithm)) {
     // A shared secret is never published, so there is no key set to fetch it from.
     if (jwksUri !== undefined) {
-      problems.push(`JWT_JWKS_URI needs an RS, PS or ES algorithm, JWT_ALGORITHM is ${algorithm}`);
+      problems.push(
+        `${prefix}_JWKS_URI needs an RS, PS or ES algorithm, ${prefix}_ALGORITHM is ${algorithm}`,
+      );
     }
-    return { fixed: requireValue(env, 'JWT_SECRET', problems) };
+    return { fixed: requireValue(env, `${prefix}_SECRET`, problems) };
   }
 
-  const publicKey = optionalValue(env, 'JWT_PUBLIC_KEY');
+  const publicKey = optionalValue(env, `${prefix}_PUBLIC_KEY`);
   if (jwksUri === undefined) {
     if (publicKey === undefined) {
-      problems.push('JWT_PUBLIC_KEY or JWT_JWKS_URI is missing');
+      problems.push(`${prefix}_PUBLIC_KEY or ${prefix}_JWKS_URI is missing`);
     }
     return { fixed: publicKey ?? '' };
   }
 
   if (publicKey !== undefined) {
-    problems.push('set either JWT_PUBLIC_KEY or JWT_JWKS_URI, not both');
+    problems.push(`set either ${prefix}_PUBLIC_KEY or ${prefix}_JWKS_URI, not both`);
   }
   if (!/^https?:\/\//.test(jwksUri) || !URL.canParse(jwksUri)) {
-    problems.push(`JWT_JWKS_URI must be an http or https address, got "${jwksUri}"`);
+    problems.push(`${prefix}_JWKS_URI must be an http or https address, got "${jwksUri}"`);
   }
   return { jwksUri };
+}
+
+/** SERVICE_ISSUER with its algorithm and key, all or none; left out entirely, there is no service. */
+function readService(
+  env: NodeJS.ProcessEnv,
+  personIssuer: string | undefined,
+  problems: string[],
+): ServiceSource | undefined {
+  const issuer = optionalValue(env, 'SERVICE_ISSUER');
+  const others = ['SERVICE_ALGORITHM', 'SERVICE_PUBLIC_KEY', 'SERVICE_JWKS_URI'].filter(
+    (name) => optionalValue(env, name) !== undefined,
+  );
+
+  if (issuer === undefined) {
+    if (others.length > 0) {
+      problems.push(`SERVICE_ISSUER is missing, though ${others.join(', ')} is set`);
+    }
+    return undefined;
+  }
+  // The iss picks the source, so two sources under one issuer could not be told apart.
+  if (issuer === personIssuer) {
+    problems.push('SERVICE_ISSUER must differ from JWT_ISSUER');
+  }
+
+  // Only a public key, so nobody who reads this configuration can sign for the service.
+  const algorithm = optionalValue(env, 'SERVICE_ALGORITHM') ?? 'RS256';
+  if (!isTokenAlgorithm(algorithm) || usesSharedSecret(algorithm)) {
+    problems.push(`SERVICE_ALGORITHM must be an RS, PS or ES algorithm, got "${algorithm}"`);
+    return undefined;
+  }
+  return { issuer, algorithm, key: readTokenKey(env, 'SERVICE', algorithm, problems) };
 }
 
 /** TOP_CLAIM with TOP_VALUES, both or neither; half of it would quietly put nobody at the top. */

@@ -9,7 +9,7 @@ import { openSession, type SessionContext } from './session.ts';
 export { CollabKitError } from './api.ts';
 
 /** Every pseudonym of CK begins so, and no person's key may. */
-export const isPseudonym: typeof Api.isPseudonym = (key) => key.startsWith('anon-');
+export const isPseudonym: typeof Api.isPseudonym = (key) => key.startsWith('anonymous-');
 
 /** The library for one instance of CK; typed by api.ts, so v1.d.ts says what v1.js does. */
 export const createCollabKitApi: typeof Api.createCollabKitApi = (options) => {

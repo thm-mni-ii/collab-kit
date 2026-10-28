@@ -1,7 +1,8 @@
 import pino from 'pino';
-import { readConfig } from './config.ts';
+import { readConfig, type TokenKey } from './config.ts';
 import { loadKeySet } from './auth/jwks.ts';
-import { createTokenCheck } from './auth/token.ts';
+import { createTokenCheck, createTokenSwitch } from './auth/token.ts';
+import type { KeyLookup, TokenAlgorithm } from './auth/token.ts';
 import { applyDefinitions } from './db/apply.ts';
 import { connect } from './db/client.ts';
 import { createActorNotes } from './db/collections/actors.ts';
@@ -19,19 +20,32 @@ const storage = await connect({ uri: config.mongoUri, database: config.mongoDb }
 await applyDefinitions(storage.db, collectionDefinitions);
 log.info({ database: config.mongoDb, collections: collectionDefinitions.length }, 'database ready');
 
-// Keys come from the set the issuing tool publishes, loaded now, or from the one fixed key.
-const tokenKey =
-  'jwksUri' in config.jwtKey
-    ? await loadKeySet({ uri: config.jwtKey.jwksUri, algorithm: config.jwtAlgorithm, logger: log })
-    : config.jwtKey.fixed;
-const checkToken = createTokenCheck({
-  key: tokenKey,
+// Keys come from the set a source publishes, loaded now, or from its one fixed key.
+const keyOf = (key: TokenKey, algorithm: TokenAlgorithm): Promise<KeyLookup> | string =>
+  'jwksUri' in key ? loadKeySet({ uri: key.jwksUri, algorithm, logger: log }) : key.fixed;
+const checkPerson = createTokenCheck({
+  key: await keyOf(config.jwtKey, config.jwtAlgorithm),
   algorithm: config.jwtAlgorithm,
   clockToleranceSeconds: config.jwtClockTolerance,
   actorClaim: config.actorClaim,
   labelClaim: config.labelClaim,
   ...defined({ issuer: config.jwtIssuer, audience: config.jwtAudience, top: config.top }),
 });
+// A service signs its own tokens, and their iss sends them to a check of their own.
+const service = config.service;
+const checkToken =
+  service === undefined
+    ? checkPerson
+    : createTokenSwitch(checkPerson, {
+        issuer: service.issuer,
+        check: createTokenCheck({
+          key: await keyOf(service.key, service.algorithm),
+          algorithm: service.algorithm,
+          clockToleranceSeconds: config.jwtClockTolerance,
+          issuer: service.issuer,
+          keys: 'services',
+        }),
+      });
 // One memory of the names written, so REST and WebSocket do not each write them again.
 const noteActor = createActorNotes(storage.db, log);
 // Keeps the open workpieces in memory for real-time work.

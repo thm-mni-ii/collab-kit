@@ -185,7 +185,7 @@ describe('the REST wrapper', () => {
   });
 
   it('tells a pseudonym from a key', () => {
-    expect(isPseudonym('anon-0042')).toBe(true);
+    expect(isPseudonym('anonymous-0042')).toBe(true);
     expect(isPseudonym('alice')).toBe(false);
   });
 

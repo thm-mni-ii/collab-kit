@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { describe, expect, it } from 'vitest';
 
 import { loadKeySet } from '../../src/auth/jwks.ts';
-import { createTokenCheck } from '../../src/auth/token.ts';
+import { createTokenCheck, createTokenSwitch } from '../../src/auth/token.ts';
 
 const secret = 'geheimnis-des-werkzeugs';
 const check = createTokenCheck({ key: secret, algorithm: 'HS256' });
@@ -75,9 +75,15 @@ describe('createTokenCheck', () => {
   });
 
   it('refuses a key like a pseudonym, so nobody passes for someone writing anonymously', async () => {
-    await expect(check(sign({ sub: 'anon-1234' }, { expiresIn: '15m' }))).rejects.toThrowError(
+    await expect(check(sign({ sub: 'anonymous-1234' }, { expiresIn: '15m' }))).rejects.toThrowError(
       'token rejected',
     );
+  });
+
+  it('refuses a key like a service, so no person passes for one', async () => {
+    await expect(
+      check(sign({ sub: 'service-modeling-copilot' }, { expiresIn: '15m' })),
+    ).rejects.toThrowError('token rejected');
   });
 
   it('refuses another algorithm even when the signature fits', async () => {
@@ -368,5 +374,103 @@ describe('createTokenCheck with the key set of the tool', () => {
 
     await expect(rs256(forged)).rejects.toThrowError('token rejected');
     expect(fetches).toBe(before);
+  });
+});
+
+describe('createTokenCheck for the tokens of a service', () => {
+  const service = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const publicKey = service.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const checkService = createTokenCheck({
+    key: publicKey,
+    algorithm: 'ES256',
+    issuer: 'modeling-copilot',
+    top: { claim: 'globalRole', values: ['ADMIN'] },
+    keys: 'services',
+  });
+
+  function signService(payload: object, options: jwt.SignOptions = { expiresIn: '5m' }): string {
+    return jwt.sign(payload, service.privateKey, {
+      algorithm: 'ES256',
+      issuer: 'modeling-copilot',
+      ...options,
+    });
+  }
+
+  it('takes a short-lived token that names a key of a service', async () => {
+    const token = signService({ sub: 'service-modeling-copilot', name: 'Modeling Copilot' });
+
+    await expect(checkService(token)).resolves.toEqual({
+      actorId: 'service-modeling-copilot',
+      label: 'Modeling Copilot',
+      expiresAt: expect.any(Number),
+    });
+  });
+
+  it('refuses a key without the service prefix, so a service key names no person', async () => {
+    await expect(checkService(signService({ sub: 'alice' }))).rejects.toThrowError(
+      'token rejected',
+    );
+  });
+
+  it('refuses a token without exp', async () => {
+    await expect(checkService(signService({ sub: 'service-tutor' }, {}))).rejects.toThrowError(
+      'token rejected',
+    );
+  });
+
+  it('takes 10 minutes at most, the clock tolerance aside', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    await expect(
+      checkService(signService({ sub: 'service-tutor', exp: now + 600 }, {})),
+    ).resolves.toMatchObject({ actorId: 'service-tutor' });
+    await expect(
+      checkService(signService({ sub: 'service-tutor', exp: now + 660 }, {})),
+    ).rejects.toThrowError('token rejected');
+  });
+
+  it('never puts a service at the top, whatever its claims say', async () => {
+    const token = signService({ sub: 'service-tutor', globalRole: 'ADMIN' });
+
+    await expect(checkService(token)).resolves.not.toHaveProperty('top');
+  });
+
+  describe('behind a switch with the check for persons', () => {
+    const checkToken = createTokenSwitch(check, {
+      issuer: 'modeling-copilot',
+      check: checkService,
+    });
+
+    it('hands a token with the issuer of the service to the service check', async () => {
+      await expect(checkToken(signService({ sub: 'service-tutor' }))).resolves.toMatchObject({
+        actorId: 'service-tutor',
+      });
+    });
+
+    it('hands every other token to the check for persons, with or without iss', async () => {
+      await expect(checkToken(sign({ sub: 'alice' }))).resolves.toEqual({ actorId: 'alice' });
+      await expect(
+        checkToken(sign({ sub: 'alice' }, { issuer: 'https://fbs.example' })),
+      ).resolves.toEqual({ actorId: 'alice' });
+    });
+
+    it('refuses the issuer of the service on a token it did not sign', async () => {
+      const forged = sign(
+        { sub: 'service-tutor' },
+        { issuer: 'modeling-copilot', expiresIn: '5m' },
+      );
+
+      await expect(checkToken(forged)).rejects.toThrowError('token rejected');
+    });
+
+    it('refuses a service token under another issuer, as the check for persons gets it', async () => {
+      const astray = signService({ sub: 'service-tutor' }, { issuer: 'other', expiresIn: '5m' });
+
+      await expect(checkToken(astray)).rejects.toThrowError('token rejected');
+    });
+
+    it('passes a malformed token on to the check for persons, which refuses it', async () => {
+      await expect(checkToken('gar-kein-token')).rejects.toThrowError('token rejected');
+    });
   });
 });

@@ -219,6 +219,14 @@ spec:
             # States of tasks and comments that only decide may set; blank until the tool names them.
             - name: DECISION_STATES
               value: ''
+            # A service that signs its own tokens, such as the backend of a tool; blank means none.
+            # Only its public key lies here, the private key stays with the service.
+            - name: SERVICE_ISSUER
+              value: ''
+            - name: SERVICE_ALGORITHM
+              value: ''
+            - name: SERVICE_PUBLIC_KEY
+              value: ''
           envFrom:
             - configMapRef:
                 name: collab-kit-config
