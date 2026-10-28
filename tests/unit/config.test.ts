@@ -211,3 +211,58 @@ describe('readConfig', () => {
     ).toThrowError(/JWT_SECRET still holds the example placeholder/);
   });
 });
+
+describe('readConfig for a service that signs its own tokens', () => {
+  const issuer = 'modeling-copilot';
+
+  it('reads the issuer, the algorithm and a fixed public key', () => {
+    const config = readConfig({
+      ...valid,
+      SERVICE_ISSUER: issuer,
+      SERVICE_ALGORITHM: 'ES256',
+      SERVICE_PUBLIC_KEY: 'pem',
+    });
+
+    expect(config.service).toEqual({ issuer, algorithm: 'ES256', key: { fixed: 'pem' } });
+  });
+
+  it('takes RS256 when no algorithm is set, and a key set instead of a fixed key', () => {
+    const uri = 'https://service.example/jwks';
+    const config = readConfig({ ...valid, SERVICE_ISSUER: issuer, SERVICE_JWKS_URI: uri });
+
+    expect(config.service).toEqual({ issuer, algorithm: 'RS256', key: { jwksUri: uri } });
+  });
+
+  it('has no service while every service variable is blank', () => {
+    expect(readConfig({ ...valid, SERVICE_ISSUER: ' ' })).not.toHaveProperty('service');
+  });
+
+  it('refuses the other service variables without SERVICE_ISSUER', () => {
+    expect(() => readConfig({ ...valid, SERVICE_PUBLIC_KEY: 'pem' })).toThrowError(
+      /SERVICE_ISSUER is missing, though SERVICE_PUBLIC_KEY is set/,
+    );
+  });
+
+  it('requires a key for the service', () => {
+    expect(() => readConfig({ ...valid, SERVICE_ISSUER: issuer })).toThrowError(
+      /SERVICE_PUBLIC_KEY or SERVICE_JWKS_URI is missing/,
+    );
+  });
+
+  it('refuses a shared secret, so nobody who reads the configuration can sign for the service', () => {
+    expect(() =>
+      readConfig({ ...valid, SERVICE_ISSUER: issuer, SERVICE_ALGORITHM: 'HS256' }),
+    ).toThrowError(/SERVICE_ALGORITHM must be an RS, PS or ES algorithm, got "HS256"/);
+  });
+
+  it('refuses the issuer of the persons, as the iss could no longer tell the two apart', () => {
+    expect(() =>
+      readConfig({
+        ...valid,
+        JWT_ISSUER: 'https://fbs.example',
+        SERVICE_ISSUER: 'https://fbs.example',
+        SERVICE_PUBLIC_KEY: 'pem',
+      }),
+    ).toThrowError(/SERVICE_ISSUER must differ from JWT_ISSUER/);
+  });
+});

@@ -1,6 +1,6 @@
 import { createPublicKey, createSecretKey, type KeyObject } from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { isPseudonym, type Actor } from '../model/actor.ts';
+import { isPseudonym, isServiceKey, type Actor } from '../model/actor.ts';
 import { asActorId, asNonBlank } from '../utils/input.ts';
 import { defined } from '../utils/optional.ts';
 
@@ -40,6 +40,12 @@ export interface TopClaim {
 /** Finds the key a token names by the kid in its header. */
 export type KeyLookup = (kid: string | undefined) => Promise<KeyObject>;
 
+/** Takes a token and returns whom it names, or throws TokenRejected. */
+export type TokenCheck = (token: string) => Promise<Actor>;
+
+/** Longest a service token may still run, so one that leaks soon counts for nothing. */
+export const MAX_SERVICE_LIFETIME_SECONDS = 10 * 60;
+
 export interface TokenOptions {
   /** The shared secret for an HS algorithm, the tool's public key as PEM, or a lookup into its key set. */
   readonly key: string | KeyLookup;
@@ -57,6 +63,8 @@ export interface TokenOptions {
   readonly audience?: readonly string[];
   /** Who stands at the top, as the docking tool names it; left out, nobody does. */
   readonly top?: TopClaim;
+  /** Whose tokens the check takes: persons by default, or services that sign their own. */
+  readonly keys?: 'persons' | 'services';
 }
 
 /** One message for every rejection, the reason stays in `cause` for the log only. */
@@ -68,11 +76,12 @@ export class TokenRejected extends Error {
 }
 
 /** Returns the check; algorithm and claims are fixed per instance, never read from a token. */
-export function createTokenCheck(options: TokenOptions): (token: string) => Promise<Actor> {
+export function createTokenCheck(options: TokenOptions): TokenCheck {
   const algorithm = options.algorithm;
   const actorClaim = options.actorClaim ?? 'sub';
   const labelClaim = options.labelClaim ?? 'name';
   const clockTolerance = options.clockToleranceSeconds ?? 5;
+  const forServices = options.keys === 'services';
 
   // A fixed key is read once, so a broken one stops the start instead of failing every request.
   const lookup = typeof options.key === 'function' ? options.key : fixedKey(options.key, algorithm);
@@ -111,14 +120,40 @@ export function createTokenCheck(options: TokenOptions): (token: string) => Prom
     if (isPseudonym(actorId)) {
       throw new TokenRejected(new Error(`claim ${actorClaim} holds a key like a pseudonym`));
     }
+    // Each source keeps to its own keys, so neither passes for the other.
+    if (isServiceKey(actorId) !== forServices) {
+      const wrong = forServices ? 'a key without the service prefix' : 'a key like a service';
+      throw new TokenRejected(new Error(`claim ${actorClaim} holds ${wrong}`));
+    }
 
     const label = asNonBlank(claims[labelClaim]);
-    // As long as verify takes the token, so an open connection ends exactly where a new one would fail.
     const exp = claims['exp'];
+    // A service signs its own tokens, so only a short life keeps a leaked one from counting long.
+    if (
+      forServices &&
+      (typeof exp !== 'number' ||
+        exp > Date.now() / 1000 + MAX_SERVICE_LIFETIME_SECONDS + clockTolerance)
+    ) {
+      throw new TokenRejected(
+        new Error(`a service token must expire within ${MAX_SERVICE_LIFETIME_SECONDS} seconds`),
+      );
+    }
+    // As long as verify takes the token, so an open connection ends exactly where a new one would fail.
     const expiresAt = typeof exp === 'number' ? exp + clockTolerance : undefined;
+    // A service never stands at the top, its rights come from grants alone.
+    const top = forServices ? undefined : topOf(claims, options.top);
 
-    return { actorId, ...defined({ label, top: topOf(claims, options.top), expiresAt }) };
+    return { actorId, ...defined({ label, top, expiresAt }) };
   };
+}
+
+/** Hands a token to the service check when its iss names the service, else to the one for persons. */
+export function createTokenSwitch(
+  persons: TokenCheck,
+  service: { readonly issuer: string; readonly check: TokenCheck },
+): TokenCheck {
+  // The iss only picks the check; the picked one verifies it together with the signature.
+  return (token) => (issuerOf(token) === service.issuer ? service.check(token) : persons(token));
 }
 
 /** True when the top claim holds one of its values, alone or in a list; else nothing at all. */
@@ -151,6 +186,16 @@ function readHeader(token: string): jwt.JwtHeader {
     throw new Error('token is malformed');
   }
   return decoded.header;
+}
+
+/** The iss of a token, read without any check; nothing when it has none or is malformed. */
+function issuerOf(token: string): unknown {
+  // A malformed token goes on to the check for persons, which refuses it as before.
+  try {
+    return jwt.decode(token, { json: true })?.iss;
+  } catch {
+    return undefined;
+  }
 }
 
 /** jsonwebtoken wants a list with at least one entry; an empty one means no check. */
