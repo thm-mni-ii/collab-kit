@@ -25,7 +25,9 @@ rights where is up to the docking tool.
 The service issues no tokens. It verifies the JWT the docking tool sends with every request, as
 `Authorization: Bearer <token>` over HTTP or as WebSocket subprotocols `['bearer', <token>]`, and
 reads from it who is acting. An open WebSocket closes with 4401 once its token expires, unless the
-client sends a new one, which the client library does on its own. How the service checks the token
+client sends a new one, which the client library does on its own. A service without a person, such
+as a tool's backend or an AI agent, may sign its own short-lived tokens as a second source, picked
+by their `iss`; it gets its rights from grants like anyone else. How the service checks the token
 (algorithm, key or JWKS, issuer, audience, claims) is set per instance in `.env`, and
 `.env.example` describes every variable.
 
