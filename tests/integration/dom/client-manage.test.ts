@@ -429,6 +429,23 @@ describe('<ck-management>', () => {
     expect(textOf(element)).not.toContain('Team I');
   });
 
+  it('shows the first members of a long group and unfolds the rest on request', async () => {
+    const members = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7'];
+    await alice.groups.create({ name: 'Team K', members });
+
+    const element = await mount(alice);
+    await click(element, 'Gruppen');
+    await click(element, 'Team K');
+    expect(find(rootOf(element), '.row')).toHaveLength(5);
+    expect(textOf(element)).toContain('Mitglieder (7)');
+    expect(textOf(element)).toContain('2 weitere ausgeblendet');
+
+    await click(element, 'Alle 7 anzeigen ▾');
+    expect(find(rootOf(element), '.row')).toHaveLength(7);
+    await click(element, 'Weniger anzeigen ▴');
+    expect(find(rootOf(element), '.row')).toHaveLength(5);
+  });
+
   it('tells a refusal of CK in its own words', async () => {
     const room = await alice.rooms.create({ name: 'Übung 6' });
     const team = await alice.groups.create({ name: 'Team E', members: ['bob'] });

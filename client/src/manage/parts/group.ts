@@ -8,7 +8,9 @@ import type { Texts } from '../look/texts.ts';
 import { base } from '../look/theme.ts';
 import type { Form } from '../store.ts';
 import { emit } from './events.ts';
+import { counted } from './wording.ts';
 import './access-card.ts';
+import './fold.ts';
 import './legend.ts';
 import './form.ts';
 import './head.ts';
@@ -57,12 +59,16 @@ export class CkGroupDetail extends LitElement {
         .form=${form}
         .busy=${this.busy}
       ></ck-head>
-      <h3>${t.members}</h3>
+      <h3>${counted(t.members, group.members.length)}</h3>
       <p class="lead">${t.leadMembers}</p>
       ${
         group.members.length === 0
           ? html`<p class="empty">${t.noMembers}</p>`
-          : group.members.map((actorId) => this.memberRow(actorId))
+          : html`<ck-fold
+              .t=${t}
+              .limit=${5}
+              .items=${group.members.map((actorId) => this.memberRow(actorId))}
+            ></ck-fold>`
       }
       ${
         this.manages
@@ -138,28 +144,32 @@ export class CkGroupDetail extends LitElement {
     const { t } = this;
 
     return html`<div class="section">
-        <h3>${t.groupAccess}</h3>
+        <h3>${counted(t.groupAccess, grants.length)}</h3>
         <ck-legend .t=${t}></ck-legend>
         <p class="lead">${t.leadGroupAccess}</p>
       </div>
       ${
         grants.length === 0
           ? html`<p class="empty">${t.groupHasNone}</p>`
-          : grants.map(
-              (grant) =>
-                html`<ck-access-card
-                  .t=${t}
-                  .heading=${this.placeName(grant.scope)}
-                  .subject=${t.thisGroup}
-                  .where=${
-                    grant.scope === undefined
-                      ? t.whereEverywhere
-                      : t.wherePlace.replace('{name}', this.placeName(grant.scope))
-                  }
-                  .grant=${grant}
-                  .busy=${this.busy}
-                ></ck-access-card>`,
-            )
+          : html`<ck-fold
+              .t=${t}
+              .limit=${3}
+              .items=${grants.map(
+                (grant) =>
+                  html`<ck-access-card
+                    .t=${t}
+                    .heading=${this.placeName(grant.scope)}
+                    .subject=${t.thisGroup}
+                    .where=${
+                      grant.scope === undefined
+                        ? t.whereEverywhere
+                        : t.wherePlace.replace('{name}', this.placeName(grant.scope))
+                    }
+                    .grant=${grant}
+                    .busy=${this.busy}
+                  ></ck-access-card>`,
+              )}
+            ></ck-fold>`
       }`;
   }
 }

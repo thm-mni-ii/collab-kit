@@ -15,3 +15,8 @@ export function wording(
     manage: { name: t.rightManage, verb: t.verbManage, hint: t.hintManage },
   };
 }
+
+/** A heading with how many entries lie under it, once there are any. */
+export function counted(label: string, count: number): string {
+  return count > 0 ? `${label} (${count})` : label;
+}

@@ -8,7 +8,9 @@ import type { Texts } from '../look/texts.ts';
 import { base } from '../look/theme.ts';
 import type { Form } from '../store.ts';
 import { emit } from './events.ts';
+import { counted } from './wording.ts';
 import './access-card.ts';
+import './fold.ts';
 import './legend.ts';
 import './form.ts';
 import './head.ts';
@@ -58,12 +60,16 @@ export class CkRoomDetail extends LitElement {
         .form=${form}
         .busy=${this.busy}
       ></ck-head>
-      <h3>${t.workpieces}</h3>
+      <h3>${counted(t.workpieces, room.workpieces.length)}</h3>
       <p class="lead">${t.leadWorkpieces}</p>
       ${
         room.workpieces.length === 0
           ? html`<p class="empty">${t.noWorkpieces}</p>`
-          : room.workpieces.map((id) => this.workpieceRow(id))
+          : html`<ck-fold
+              .t=${t}
+              .limit=${5}
+              .items=${room.workpieces.map((id) => this.workpieceRow(id))}
+            ></ck-fold>`
       }
       ${
         this.edits && this.creates
@@ -147,24 +153,28 @@ export class CkRoomDetail extends LitElement {
 
     return html`
       <div class="section">
-        <h3>${t.access}</h3>
+        <h3>${counted(t.access, grants.length)}</h3>
         <ck-legend .t=${t}></ck-legend>
         <p class="lead">${t.leadAccess}</p>
       </div>
       ${
         grants.length === 0
           ? html`<p class="empty">${t.noAccess}</p>`
-          : grants.map(
-              (grant) =>
-                html`<ck-access-card
-                  .t=${t}
-                  .heading=${nameOf(grant.groupId)}
-                  .subject=${nameOf(grant.groupId)}
-                  .where=${t.whereHere}
-                  .grant=${grant}
-                  .busy=${this.busy}
-                ></ck-access-card>`,
-            )
+          : html`<ck-fold
+              .t=${t}
+              .limit=${3}
+              .items=${grants.map(
+                (grant) =>
+                  html`<ck-access-card
+                    .t=${t}
+                    .heading=${nameOf(grant.groupId)}
+                    .subject=${nameOf(grant.groupId)}
+                    .where=${t.whereHere}
+                    .grant=${grant}
+                    .busy=${this.busy}
+                  ></ck-access-card>`,
+              )}
+            ></ck-fold>`
       }
       ${
         without.length === 0

@@ -2,6 +2,7 @@
 
 import { Management } from './management.ts';
 import { CkAccessCard } from './parts/access-card.ts';
+import { CkFold } from './parts/fold.ts';
 import { CkForm } from './parts/form.ts';
 import { CkGroupDetail } from './parts/group.ts';
 import { CkHead } from './parts/head.ts';
@@ -12,6 +13,7 @@ import { CkWorkpieceDetail } from './parts/workpiece.ts';
 const elements = {
   'ck-management': Management,
   'ck-form': CkForm,
+  'ck-fold': CkFold,
   'ck-head': CkHead,
   'ck-access-card': CkAccessCard,
   'ck-legend': CkLegend,
