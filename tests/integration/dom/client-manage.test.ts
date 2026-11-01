@@ -63,6 +63,8 @@ async function settled(element: Management): Promise<void> {
   await element.updateComplete;
   expect(await waitFor(() => !element.hasAttribute('aria-busy'))).toBe(true);
   await element.updateComplete;
+  // The parts draw themselves a turn later than the element that holds them.
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function rootOf(element: Management): ShadowRoot {
@@ -72,20 +74,39 @@ function rootOf(element: Management): ShadowRoot {
   return element.shadowRoot;
 }
 
+/** Every element of the selector in this root and in the roots of the parts below it. */
+function find(root: ParentNode, selector: string): Element[] {
+  const found = [...root.querySelectorAll(selector)];
+  for (const each of root.querySelectorAll('*')) {
+    if (each.shadowRoot !== null) {
+      found.push(...find(each.shadowRoot, selector));
+    }
+  }
+  return found;
+}
+
+/** The text of this root with the text of the parts below it. */
+function textIn(root: ParentNode): string {
+  const parts = [...root.querySelectorAll('*')].flatMap((each) =>
+    each.shadowRoot === null ? [] : [textIn(each.shadowRoot)],
+  );
+  return `${root.textContent ?? ''} ${parts.join(' ')}`;
+}
+
 /** All the element shows, as one line. */
 function textOf(element: Management): string {
-  return (rootOf(element).textContent ?? '').replaceAll(/\s+/g, ' ');
+  return textIn(rootOf(element)).replaceAll(/\s+/g, ' ');
 }
 
 /** The first button with this text or this label. */
 function button(element: Management, label: string): HTMLButtonElement {
-  const found = [...rootOf(element).querySelectorAll('button')].find(
+  const found = find(rootOf(element), 'button').find(
     (each) => each.textContent?.trim() === label || each.getAttribute('aria-label') === label,
   );
   if (found === undefined) {
     throw new Error(`no button "${label}"`);
   }
-  return found;
+  return found as HTMLButtonElement;
 }
 
 async function click(element: Management, label: string): Promise<void> {
@@ -95,8 +116,8 @@ async function click(element: Management, label: string): Promise<void> {
 
 /** Types into the open form and sends it. */
 async function fill(element: Management, text: string): Promise<void> {
-  const input = rootOf(element).querySelector<HTMLInputElement>('form input[name=text]');
-  if (input === null) {
+  const input = find(rootOf(element), 'form input[name=text]')[0] as HTMLInputElement | undefined;
+  if (input === undefined) {
     throw new Error('no form open');
   }
   input.value = text;
@@ -106,7 +127,7 @@ async function fill(element: Management, text: string): Promise<void> {
 
 /** Picks the workpiece of this name in the list. */
 async function pickWorkpiece(element: Management, name: string): Promise<HTMLElement> {
-  const item = [...rootOf(element).querySelectorAll<HTMLElement>('.item')].find(
+  const item = (find(rootOf(element), '.item') as HTMLElement[]).find(
     (each) => each.querySelector('.name')?.textContent?.trim() === name,
   );
   if (item === undefined) {
@@ -119,8 +140,8 @@ async function pickWorkpiece(element: Management, name: string): Promise<HTMLEle
 
 /** Gives this group access to the shown room. */
 async function give(element: Management, groupId: string): Promise<void> {
-  const select = rootOf(element).querySelector('select');
-  if (select === null) {
+  const select = find(rootOf(element), 'select')[0] as HTMLSelectElement | undefined;
+  if (select === undefined) {
     throw new Error('no group to give access to');
   }
   select.value = groupId;
@@ -128,14 +149,26 @@ async function give(element: Management, groupId: string): Promise<void> {
   await settled(element);
 }
 
-/** Switches one right in the access row of this name. */
+/** The German text of every right. */
+const CHIPS: Record<string, string> = {
+  see: 'Sehen',
+  edit: 'Bearbeiten',
+  plan: 'Planen',
+};
+
+/** Switches one right in the access card of this name; anonymous takes the way not yet chosen. */
 async function toggle(element: Management, row: string, right: string): Promise<void> {
-  const found = [...rootOf(element).querySelectorAll('.row')].find(
-    (each) => each.querySelector('span')?.textContent?.trim() === row,
-  );
-  const chip = [...(found?.querySelectorAll('.chip') ?? [])].find(
-    (each) => each.textContent?.trim() === right,
-  );
+  const card = find(rootOf(element), 'ck-access-card').find(
+    (each) => each.shadowRoot?.querySelector('.name')?.textContent?.trim() === row,
+  )?.shadowRoot;
+  const chip =
+    right === 'anonymous'
+      ? [...(card?.querySelectorAll('.seg button') ?? [])].find(
+          (each) => each.getAttribute('aria-pressed') === 'false',
+        )
+      : [...(card?.querySelectorAll('.chip') ?? [])].find(
+          (each) => each.textContent?.trim() === CHIPS[right],
+        );
   if (!(chip instanceof HTMLElement)) {
     throw new Error(`no right "${right}" in the row "${row}"`);
   }
@@ -234,7 +267,7 @@ describe('<ck-management>', () => {
     await click(element, 'Carol');
     expect((await alice.groups.get(group._id)).members).toEqual(['bob', 'carol']);
     // The name findPeople gave, its key beside it.
-    const carol = [...rootOf(element).querySelectorAll('.row')].find(
+    const carol = find(rootOf(element), '.row').find(
       (row) => row.querySelector('.key')?.textContent === 'carol',
     );
     expect(carol?.textContent).toContain('Carol');
@@ -269,7 +302,7 @@ describe('<ck-management>', () => {
     const text = textOf(element);
     expect(text).toContain('Übung 4');
     expect(text).toContain('Entwurf');
-    for (const absent of ['Raum anlegen', 'Umbenennen', 'Löschen', 'Zugriff']) {
+    for (const absent of ['Raum anlegen', 'Umbenennen', 'Löschen', 'Zugriff der Gruppen']) {
       expect(text).not.toContain(absent);
     }
 

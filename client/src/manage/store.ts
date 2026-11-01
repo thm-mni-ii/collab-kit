@@ -74,6 +74,8 @@ export interface State {
   readonly busy: boolean;
   /** What CK refused last, when no form was open to show it. */
   readonly failure: string | undefined;
+  /** What was saved last, until the next call or the next selection. */
+  readonly saved: string | undefined;
   readonly loaded: boolean;
 }
 
@@ -91,6 +93,7 @@ const EMPTY: State = {
   form: undefined,
   busy: false,
   failure: undefined,
+  saved: undefined,
   loaded: false,
 };
 
@@ -160,13 +163,17 @@ export class Store {
   }
 
   async show(tab: Tab): Promise<void> {
-    this.set({ tab, form: undefined, failure: undefined });
+    this.set({ tab, form: undefined, failure: undefined, saved: undefined });
     await this.select(this.keptOrFirst(tab));
   }
 
   /** Shows this room, group or workpiece of the tab, with what holds there. */
   async select(id: string | undefined): Promise<void> {
-    this.set({ selected: { ...this.state.selected, [this.state.tab]: id }, form: undefined });
+    this.set({
+      selected: { ...this.state.selected, [this.state.tab]: id },
+      form: undefined,
+      saved: undefined,
+    });
     await (this.state.tab === 'workpieces' ? this.loadUse() : this.loadDetail());
   }
 
@@ -281,6 +288,7 @@ export class Store {
       });
       this.takeNames(grant);
       this.changeGrants((grants) => [...grants, grant]);
+      this.set({ saved: this.words().savedGive });
     });
   }
 
@@ -298,6 +306,7 @@ export class Store {
       if (rights.length === 0) {
         await this.ck().grants.remove(which);
         this.changeGrants((grants) => grants.filter((each) => each._id !== grant._id));
+        this.set({ saved: this.words().savedRemoved });
         return;
       }
       const changed = await this.ck().grants.set({ ...which, rights, anonymous });
@@ -305,6 +314,7 @@ export class Store {
       this.changeGrants((grants) =>
         grants.map((each) => (each._id === grant._id ? changed : each)),
       );
+      this.set({ saved: this.words().saved });
     });
   }
 
@@ -548,7 +558,7 @@ export class Store {
   /** Runs calls to CK; a refusal shows in the open form, else above the lists. */
   private async run(action: () => Promise<void>): Promise<void> {
     this.pending += 1;
-    this.set({ busy: true, failure: undefined });
+    this.set({ busy: true, failure: undefined, saved: undefined });
     try {
       await action();
     } catch (error) {
