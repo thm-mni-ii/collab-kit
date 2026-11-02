@@ -253,14 +253,14 @@ export class Store {
   }
 
   /** The text of a form, checked here, then carried out by CK. */
-  async submit(kind: FormKind, text: string): Promise<void> {
+  async submit(kind: FormKind, text: string, choice?: string): Promise<void> {
     const trimmed = text.trim();
     if (trimmed === '') {
       const t = this.words();
       this.set({ form: { kind, error: kind === 'member' ? t.keyMissing : t.nameMissing } });
       return;
     }
-    await this.run(() => this.carryOut(kind, trimmed));
+    await this.run(() => this.carryOut(kind, trimmed, choice));
   }
 
   async takeOut(room: Room, workpieceId: string): Promise<void> {
@@ -374,7 +374,7 @@ export class Store {
   }
 
   /** What a form asks for; each change takes over the answer of CK. */
-  private async carryOut(kind: FormKind, text: string): Promise<void> {
+  private async carryOut(kind: FormKind, text: string, choice?: string): Promise<void> {
     const ck = this.ck();
 
     switch (kind) {
@@ -402,7 +402,9 @@ export class Store {
         return;
       }
       case 'workpiece': {
-        const room = this.room();
+        // In the workpieces tab the room is the one picked, in a room the one shown.
+        const room =
+          choice === undefined ? this.room() : this.state.rooms.find((each) => each._id === choice);
         const make = this.host.newWorkpiece;
         if (room === undefined || make === undefined) {
           return;
@@ -415,6 +417,9 @@ export class Store {
           form: undefined,
         });
         this.replaceRoom(await ck.rooms.get(room._id));
+        if (this.state.tab === 'workpieces') {
+          await this.select(workpiece._id);
+        }
         return;
       }
       case 'member': {

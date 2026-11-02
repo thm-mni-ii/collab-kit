@@ -475,6 +475,26 @@ describe('<ck-management>', () => {
     expect(switchOf().getAttribute('aria-checked')).toBe('false');
   });
 
+  it('creates a workpiece from the workpieces tab in the room picked, and shows it', async () => {
+    const room = await alice.rooms.create({ name: 'Übung 12' });
+
+    const element = await mount(alice, { newWorkpiece: (_room, name) => ({ name }) });
+    await click(element, 'Werkstücke');
+    await click(element, 'Werkstück anlegen');
+    const choice = find(rootOf(element), 'ck-form select')[0] as HTMLSelectElement;
+    choice.value = room._id;
+    await fill(element, 'Einzelstück');
+
+    const [id] = (await alice.rooms.get(room._id)).workpieces;
+    expect(await alice.workpieces.get(id ?? '')).toMatchObject({ name: 'Einzelstück' });
+    expect(textOf(element)).toContain('Einzelstück');
+
+    // Without newWorkpiece the tool builds none, so there is nothing to offer.
+    const plain = await mount(alice);
+    await click(plain, 'Werkstücke');
+    expect(() => button(plain, 'Werkstück anlegen')).toThrow();
+  });
+
   it('tells a refusal of CK in its own words', async () => {
     const room = await alice.rooms.create({ name: 'Übung 6' });
     const team = await alice.groups.create({ name: 'Team E', members: ['bob'] });

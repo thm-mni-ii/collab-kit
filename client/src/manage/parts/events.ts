@@ -8,7 +8,7 @@ export interface PartEvents {
   'ck-form-open': { readonly kind: FormKind };
   'ck-form-close': undefined;
   'ck-form-input': undefined;
-  'ck-form-submit': { readonly kind: FormKind; readonly text: string };
+  'ck-form-submit': { readonly kind: FormKind; readonly text: string; readonly choice?: string };
   'ck-remove': undefined;
   'ck-grant-toggle': { readonly grant: Grant; readonly chip: Switch };
   'ck-grant-give': { readonly groupId: string };

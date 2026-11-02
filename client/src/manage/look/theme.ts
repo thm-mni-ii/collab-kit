@@ -335,13 +335,21 @@ export const frame = css`
   .list {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    gap: 2px;
-    padding: 8px;
+    overflow: hidden;
   }
-  .list .link {
-    align-self: flex-start;
-    margin-top: 6px;
+  .list .create {
+    flex: none;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .list .items {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    padding: 8px;
+    overflow-y: auto;
   }
   .detail {
     padding: 12px 16px;

@@ -17,13 +17,16 @@ export class CkForm extends LitElement {
     value: { attribute: false },
     busy: { attribute: false },
     error: { attribute: false },
+    choices: { attribute: false },
+    choiceLabel: { attribute: false },
   };
 
   // A form in a narrow list puts its field on a line of its own.
   static override styles = [
     base,
     css`
-      :host([block]) input {
+      :host([block]) input,
+      :host([block]) select {
         flex-basis: 100%;
       }
     `,
@@ -36,6 +39,9 @@ export class CkForm extends LitElement {
   declare value: string | undefined;
   declare busy: boolean;
   declare error: string | undefined;
+  /** What the person may pick besides the text, as value and label; left out, there is only the text. */
+  declare choices: readonly { readonly value: string; readonly label: string }[] | undefined;
+  declare choiceLabel: string | undefined;
 
   protected override firstUpdated(): void {
     this.renderRoot.querySelector('input')?.focus();
@@ -47,8 +53,13 @@ export class CkForm extends LitElement {
     // The field is read on submit, so nothing has to follow each key.
     const submit = (event: SubmitEvent) => {
       event.preventDefault();
-      const input = (event.currentTarget as HTMLFormElement).querySelector('input');
-      emit(this, 'ck-form-submit', { kind: this.kind, text: input?.value ?? '' });
+      const form = event.currentTarget as HTMLFormElement;
+      const choice = form.querySelector('select')?.value;
+      emit(this, 'ck-form-submit', {
+        kind: this.kind,
+        text: form.querySelector('input')?.value ?? '',
+        ...(choice === undefined ? {} : { choice }),
+      });
     };
 
     return html`<form class="form" @submit=${submit}>
@@ -59,6 +70,15 @@ export class CkForm extends LitElement {
           .value=${this.value ?? ''}
           @input=${() => emit(this, 'ck-form-input')}
         />
+        ${
+          this.choices === undefined
+            ? nothing
+            : html`<select aria-label=${this.choiceLabel}>
+                ${this.choices.map(
+                  (choice) => html`<option value=${choice.value}>${choice.label}</option>`,
+                )}
+              </select>`
+        }
         <button class="button primary" type="submit" ?disabled=${this.busy}>${this.label}</button>
         <button class="button" type="button" @click=${() => emit(this, 'ck-form-close')}>
           ${t.cancel}

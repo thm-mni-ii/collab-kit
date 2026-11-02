@@ -40,7 +40,10 @@ export class Management extends LitElement implements ManagementOptions {
     this.listen('ck-form-open', ({ kind }) => this.store.openForm(kind));
     this.listen('ck-form-close', () => this.store.closeForm());
     this.listen('ck-form-input', () => this.store.clearError());
-    this.listen('ck-form-submit', ({ kind, text }) => void this.store.submit(kind, text));
+    this.listen(
+      'ck-form-submit',
+      ({ kind, text, choice }) => void this.store.submit(kind, text, choice),
+    );
     this.listen('ck-remove', () => void this.store.removePlace());
     this.listen('ck-grant-toggle', ({ grant, chip }) => void this.store.toggle(grant, chip));
     this.listen('ck-grant-give', ({ groupId }) => {
@@ -183,78 +186,113 @@ export class Management extends LitElement implements ManagementOptions {
     </button>`;
   }
 
+  /** The button at the top of a list that opens the form to create one, and the form once open. */
+  private createBlock(
+    t: Texts,
+    kind: FormKind,
+    label: string,
+    placeholder: string,
+    choices?: readonly { readonly value: string; readonly label: string }[],
+  ): TemplateResult {
+    const { form, busy } = this.store.state;
+
+    return html`<div class="create">
+      <button class="link" @click=${() => this.store.openForm(kind)}>${plus} ${label}</button>
+      ${
+        form?.kind === kind
+          ? html`<ck-form
+              block
+              .t=${t}
+              .kind=${kind}
+              .placeholder=${placeholder}
+              .label=${t.create}
+              .busy=${busy}
+              .error=${form.error}
+              .choices=${choices}
+              .choiceLabel=${t.inRoom}
+            ></ck-form>`
+          : nothing
+      }
+    </div>`;
+  }
+
   /** The rooms or the groups the person sees, and creating one with manage everywhere. */
   private listView(t: Texts): TemplateResult {
-    const { tab, loaded, mayCreate, selected, form, busy } = this.store.state;
+    const { tab, loaded, mayCreate, selected } = this.store.state;
     const rooms = tab === 'rooms';
     const items: readonly { readonly _id: string; readonly name: string }[] = rooms
       ? this.store.state.rooms
       : this.store.state.groups;
-    const kind: FormKind = rooms ? 'room' : 'group';
 
     return html`
       ${
-        !loaded
-          ? html`<p class="empty">${t.loading}</p>`
-          : items.length === 0
-            ? html`<p class="empty">${rooms ? t.noRooms : t.noGroups}</p>`
-            : items.map(
-                (item) =>
-                  html`<button
-                    class="item"
-                    aria-current=${item._id === selected[tab]}
-                    @click=${() => void this.store.select(item._id)}
-                  >
-                    ${item.name}
-                  </button>`,
-              )
-      }
-      ${
         mayCreate
-          ? html`<button class="link" @click=${() => this.store.openForm(kind)}>
-                ${plus} ${rooms ? t.newRoom : t.newGroup}
-              </button>
-              ${
-                form?.kind === kind
-                  ? html`<ck-form
-                      block
-                      .t=${t}
-                      .kind=${kind}
-                      .placeholder=${rooms ? t.roomName : t.groupName}
-                      .label=${t.create}
-                      .busy=${busy}
-                      .error=${form.error}
-                    ></ck-form>`
-                  : nothing
-              }`
+          ? rooms
+            ? this.createBlock(t, 'room', t.newRoom, t.roomName)
+            : this.createBlock(t, 'group', t.newGroup, t.groupName)
           : nothing
       }
+      <div class="items">
+        ${
+          !loaded
+            ? html`<p class="empty">${t.loading}</p>`
+            : items.length === 0
+              ? html`<p class="empty">${rooms ? t.noRooms : t.noGroups}</p>`
+              : items.map(
+                  (item) =>
+                    html`<button
+                      class="item"
+                      aria-current=${item._id === selected[tab]}
+                      @click=${() => void this.store.select(item._id)}
+                    >
+                      ${item.name}
+                    </button>`,
+                )
+        }
+      </div>
     `;
   }
 
   /** Every workpiece, forks under their source, and how many rooms each lies in. */
   private workpieceList(t: Texts): TemplateResult {
     const { store } = this;
-    const { loaded, selected } = store.state;
+    const { loaded, selected, rooms } = store.state;
     const entries = store.entries();
+    // A workpiece is made by the tool and lies in a room, so both must be there.
+    const creates = this.newWorkpiece !== undefined && rooms.length > 0;
 
-    if (!loaded) {
-      return html`<p class="empty">${t.loading}</p>`;
-    }
-    if (entries.length === 0) {
-      return html`<p class="empty">${t.noWorkpiecesAtAll}</p>`;
-    }
-    return html`${entries.map(
-      ({ workpiece, fork }) =>
-        html`<button
-          class="item ${fork ? 'fork' : ''}"
-          aria-current=${workpiece._id === selected.workpieces}
-          @click=${() => void store.select(workpiece._id)}
-        >
-          <span class="name">${workpiece.name}</span>
-          <span class="sub">${roomCount(t, store.roomsOf(workpiece._id).length)}</span>
-        </button>`,
-    )}`;
+    return html`
+      ${
+        creates
+          ? this.createBlock(
+              t,
+              'workpiece',
+              t.newWorkpiece,
+              t.workpieceName,
+              rooms.map((room) => ({ value: room._id, label: room.name })),
+            )
+          : nothing
+      }
+      <div class="items">
+        ${
+          !loaded
+            ? html`<p class="empty">${t.loading}</p>`
+            : entries.length === 0
+              ? html`<p class="empty">${t.noWorkpiecesAtAll}</p>`
+              : entries.map(
+                  ({ workpiece, fork }) =>
+                    html`<button
+                      class="item ${fork ? 'fork' : ''}"
+                      aria-current=${workpiece._id === selected.workpieces}
+                      @click=${() => void store.select(workpiece._id)}
+                    >
+                      <span class="name">${workpiece.name}</span>
+                      <span class="sub">${roomCount(t, store.roomsOf(workpiece._id).length)}</span>
+                    </button>`,
+                )
+        }
+      </div>
+    `;
   }
 
   private workpieceDetail(t: Texts): TemplateResult | typeof nothing {
