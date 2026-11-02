@@ -255,6 +255,20 @@ describe('readConfig for a service that signs its own tokens', () => {
     ).toThrowError(/SERVICE_ALGORITHM must be an RS, PS or ES algorithm, got "HS256"/);
   });
 
+  it('reads the key of the service, which must begin with service-', () => {
+    const base = { ...valid, SERVICE_ISSUER: issuer, SERVICE_PUBLIC_KEY: 'pem' };
+
+    expect(readConfig({ ...base, SERVICE_ACTOR: 'service-copilot' }).service?.actor).toBe(
+      'service-copilot',
+    );
+    expect(() => readConfig({ ...base, SERVICE_ACTOR: 'copilot' })).toThrowError(
+      /SERVICE_ACTOR must begin with service-, got "copilot"/,
+    );
+    expect(() => readConfig({ ...valid, SERVICE_ACTOR: 'service-copilot' })).toThrowError(
+      /SERVICE_ISSUER is missing, though SERVICE_ACTOR is set/,
+    );
+  });
+
   it('refuses the issuer of the persons, as the iss could no longer tell the two apart', () => {
     expect(() =>
       readConfig({
