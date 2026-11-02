@@ -74,6 +74,8 @@ export interface State {
   readonly busy: boolean;
   /** What CK refused last, when no form was open to show it. */
   readonly failure: string | undefined;
+  /** What was saved last, until the next call or the next selection. */
+  readonly saved: string | undefined;
   readonly loaded: boolean;
 }
 
@@ -91,6 +93,7 @@ const EMPTY: State = {
   form: undefined,
   busy: false,
   failure: undefined,
+  saved: undefined,
   loaded: false,
 };
 
@@ -160,13 +163,17 @@ export class Store {
   }
 
   async show(tab: Tab): Promise<void> {
-    this.set({ tab, form: undefined, failure: undefined });
+    this.set({ tab, form: undefined, failure: undefined, saved: undefined });
     await this.select(this.keptOrFirst(tab));
   }
 
   /** Shows this room, group or workpiece of the tab, with what holds there. */
   async select(id: string | undefined): Promise<void> {
-    this.set({ selected: { ...this.state.selected, [this.state.tab]: id }, form: undefined });
+    this.set({
+      selected: { ...this.state.selected, [this.state.tab]: id },
+      form: undefined,
+      saved: undefined,
+    });
     await (this.state.tab === 'workpieces' ? this.loadUse() : this.loadDetail());
   }
 
@@ -246,14 +253,14 @@ export class Store {
   }
 
   /** The text of a form, checked here, then carried out by CK. */
-  async submit(kind: FormKind, text: string): Promise<void> {
+  async submit(kind: FormKind, text: string, choice?: string): Promise<void> {
     const trimmed = text.trim();
     if (trimmed === '') {
       const t = this.words();
       this.set({ form: { kind, error: kind === 'member' ? t.keyMissing : t.nameMissing } });
       return;
     }
-    await this.run(() => this.carryOut(kind, trimmed));
+    await this.run(() => this.carryOut(kind, trimmed, choice));
   }
 
   async takeOut(room: Room, workpieceId: string): Promise<void> {
@@ -281,7 +288,23 @@ export class Store {
       });
       this.takeNames(grant);
       this.changeGrants((grants) => [...grants, grant]);
+      this.set({ saved: this.words().savedGive });
     });
+  }
+
+  /** A group gets access everywhere, which holds in every room; at first only to see. */
+  async giveEverywhere(group: Group): Promise<void> {
+    await this.run(async () => {
+      const grant = await this.ck().grants.set({ groupId: group._id, rights: ['see'] });
+      this.takeNames(grant);
+      this.changeGrants((grants) => [...grants, grant]);
+      this.set({ saved: this.words().savedGive });
+    });
+  }
+
+  /** Takes a grant away whole, once the person has been asked. */
+  async removeGrant(grant: Grant): Promise<void> {
+    await this.run(() => this.dropGrant(grant));
   }
 
   /** Switches one right of a grant or its flag; without any right left the grant goes. */
@@ -296,8 +319,7 @@ export class Store {
 
     await this.run(async () => {
       if (rights.length === 0) {
-        await this.ck().grants.remove(which);
-        this.changeGrants((grants) => grants.filter((each) => each._id !== grant._id));
+        await this.dropGrant(grant);
         return;
       }
       const changed = await this.ck().grants.set({ ...which, rights, anonymous });
@@ -305,7 +327,19 @@ export class Store {
       this.changeGrants((grants) =>
         grants.map((each) => (each._id === grant._id ? changed : each)),
       );
+      this.set({ saved: this.words().saved });
     });
+  }
+
+  /** Removes the grant at CK and from what is shown. */
+  private async dropGrant(grant: Grant): Promise<void> {
+    const which =
+      grant.scope === undefined
+        ? { groupId: grant.groupId }
+        : { groupId: grant.groupId, scope: grant.scope };
+    await this.ck().grants.remove(which);
+    this.changeGrants((grants) => grants.filter((each) => each._id !== grant._id));
+    this.set({ saved: this.words().savedRemoved });
   }
 
   /** One of the people findPeople gave becomes a member. */
@@ -340,7 +374,7 @@ export class Store {
   }
 
   /** What a form asks for; each change takes over the answer of CK. */
-  private async carryOut(kind: FormKind, text: string): Promise<void> {
+  private async carryOut(kind: FormKind, text: string, choice?: string): Promise<void> {
     const ck = this.ck();
 
     switch (kind) {
@@ -368,7 +402,9 @@ export class Store {
         return;
       }
       case 'workpiece': {
-        const room = this.room();
+        // In the workpieces tab the room is the one picked, in a room the one shown.
+        const room =
+          choice === undefined ? this.room() : this.state.rooms.find((each) => each._id === choice);
         const make = this.host.newWorkpiece;
         if (room === undefined || make === undefined) {
           return;
@@ -381,6 +417,9 @@ export class Store {
           form: undefined,
         });
         this.replaceRoom(await ck.rooms.get(room._id));
+        if (this.state.tab === 'workpieces') {
+          await this.select(workpiece._id);
+        }
         return;
       }
       case 'member': {
@@ -548,7 +587,7 @@ export class Store {
   /** Runs calls to CK; a refusal shows in the open form, else above the lists. */
   private async run(action: () => Promise<void>): Promise<void> {
     this.pending += 1;
-    this.set({ busy: true, failure: undefined });
+    this.set({ busy: true, failure: undefined, saved: undefined });
     try {
       await action();
     } catch (error) {

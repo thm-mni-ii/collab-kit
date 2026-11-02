@@ -6,6 +6,7 @@ import type { KeyLookup, TokenAlgorithm } from './auth/token.ts';
 import { applyDefinitions } from './db/apply.ts';
 import { connect } from './db/client.ts';
 import { createActorNotes } from './db/collections/actors.ts';
+import { seedServiceGroup } from './db/seedService.ts';
 import { collectionDefinitions } from './db/schemas.ts';
 import { createWorkpieceHub, attachGateway } from './realtime/index.ts';
 import { createApi } from './routes/index.ts';
@@ -18,6 +19,10 @@ const log = pino({ level: config.logLevel });
 // Connect to MongoDB and bring the collection schemas up to date.
 const storage = await connect({ uri: config.mongoUri, database: config.mongoDb });
 await applyDefinitions(storage.db, collectionDefinitions);
+// A service cannot grant itself rights, so its group is made, and kept whole, at every start.
+if (config.service?.actor !== undefined) {
+  await seedServiceGroup(storage.db, config.service.actor);
+}
 log.info({ database: config.mongoDb, collections: collectionDefinitions.length }, 'database ready');
 
 // Keys come from the set a source publishes, loaded now, or from its one fixed key.
