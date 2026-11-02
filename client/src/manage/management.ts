@@ -49,6 +49,13 @@ export class Management extends LitElement implements ManagementOptions {
         void this.store.give(room, groupId);
       }
     });
+    this.listen('ck-grant-give-everywhere', () => {
+      const group = this.store.group();
+      if (group !== undefined) {
+        void this.store.giveEverywhere(group);
+      }
+    });
+    this.listen('ck-grant-remove', ({ grant }) => void this.store.removeGrant(grant));
     this.listen('ck-workpiece-open', ({ workpiece }) => {
       const room = this.store.room();
       if (room !== undefined) {
@@ -148,12 +155,20 @@ export class Management extends LitElement implements ManagementOptions {
     </div>`;
   }
 
-  /** The longer explanation: what the rights are, what everywhere means, who may create. */
+  /** The longer explanation: the words of the panel and the rules that are not to be seen in it. */
   private infoView(t: Texts): TemplateResult {
+    const entries = [
+      [t.glossRoom, t.glossRoomText],
+      [t.glossWorkpiece, t.glossWorkpieceText],
+      [t.glossGroup, t.glossGroupText],
+      [t.glossAccess, t.glossAccessText],
+      [t.glossEverywhere, t.glossEverywhereText],
+      [t.glossPerson, t.glossPersonText],
+      [t.glossCreate, t.glossCreateText],
+    ];
+
     return html`<div class="more">
-      <p><b>${t.infoRights}</b> ${t.infoRightsText}</p>
-      <p><b>${t.infoEverywhere}</b> ${t.infoEverywhereText}</p>
-      <p><b>${t.infoCreate}</b> ${t.infoCreateText}</p>
+      ${entries.map(([term, text]) => html`<p><b>${term}</b> ${text}</p>`)}
     </div>`;
   }
 
@@ -299,6 +314,7 @@ export class Management extends LitElement implements ManagementOptions {
       .manages=${detail?.rights.includes('manage') === true}
       .grants=${detail?.grants}
       .searches=${this.findPeople !== undefined}
+      .mayEverywhere=${store.state.mayCreate}
       .busy=${store.state.busy}
       .form=${store.state.form}
       .placeName=${(scope: Parameters<Store['placeName']>[0]) => store.placeName(scope)}

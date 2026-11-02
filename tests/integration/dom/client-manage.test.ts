@@ -239,9 +239,12 @@ describe('<ck-management>', () => {
       { groupId: group?._id, rights: ['see', 'edit'] },
     ]);
 
-    // Without any right left the grant goes.
+    // The last right does not go at once, the person is asked, and then the grant goes.
     await toggle(element, 'Team A', 'see');
     await toggle(element, 'Team A', 'edit');
+    expect(textOf(element)).toContain('Das ist das letzte Recht.');
+    expect(await alice.grants.list({ scope })).toMatchObject([{ rights: ['edit'] }]);
+    await click(element, 'Ja, Zugriff entfernen');
     expect(await alice.grants.list({ scope })).toEqual([]);
     expect(textOf(element)).toContain('Noch keine Gruppe hat hier Zugriff.');
   });
@@ -444,6 +447,32 @@ describe('<ck-management>', () => {
     expect(find(rootOf(element), '.row')).toHaveLength(7);
     await click(element, 'Weniger anzeigen ▴');
     expect(find(rootOf(element), '.row')).toHaveLength(5);
+  });
+
+  it('gives a group access in all rooms with a switch, and takes it away once asked', async () => {
+    const team = await alice.groups.create({ name: 'Team L' });
+
+    const element = await mount(alice);
+    await click(element, 'Gruppen');
+    await click(element, 'Team L');
+    const switchOf = () => find(rootOf(element), '[role=switch]')[0] as HTMLElement;
+    expect(switchOf().getAttribute('aria-checked')).toBe('false');
+
+    switchOf().click();
+    await settled(element);
+    const [given] = await alice.grants.list({ groupId: team._id });
+    expect(given).toMatchObject({ rights: ['see'] });
+    expect(given?.scope).toBeUndefined();
+    expect(textOf(element)).toContain('Alle Räume');
+
+    // Switching off asks first, the access goes only once it is confirmed.
+    switchOf().click();
+    await settled(element);
+    expect(textOf(element)).toContain('Damit entfällt der Zugriff');
+    expect(await alice.grants.list({ groupId: team._id })).toHaveLength(1);
+    await click(element, 'Ja, Zugriff entfernen');
+    expect(await alice.grants.list({ groupId: team._id })).toEqual([]);
+    expect(switchOf().getAttribute('aria-checked')).toBe('false');
   });
 
   it('tells a refusal of CK in its own words', async () => {

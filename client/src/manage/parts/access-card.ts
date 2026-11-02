@@ -1,6 +1,7 @@
 /** <ck-access-card>: one grant, its rights as switches, how the members appear, and what it all means. */
 
-import { LitElement, css, html, type TemplateResult } from 'lit';
+import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
+import { ifDefined } from 'lit/directives/if-defined.js';
 
 import type { Grant, Right } from '../../api.ts';
 import { person, pseudonym } from '../look/icons.ts';
@@ -22,10 +23,12 @@ export class CkAccessCard extends LitElement {
   static override properties = {
     t: { attribute: false },
     heading: { attribute: false },
+    headingHint: { attribute: false },
     subject: { attribute: false },
     where: { attribute: false },
     grant: { attribute: false },
     busy: { attribute: false },
+    asking: { state: true },
   };
 
   static override styles = [
@@ -123,11 +126,27 @@ export class CkAccessCard extends LitElement {
   declare t: Texts;
   /** What the grant is about: the group in a room, the place in a group. */
   declare heading: string;
+  /** What the heading means, as a tooltip, where it needs saying. */
+  declare headingHint: string | undefined;
   /** Who the sentence is about, and where it holds. */
   declare subject: string;
   declare where: string;
   declare grant: Grant;
   declare busy: boolean;
+  /** Whether the last right is about to go and the person is asked first. */
+  declare asking: boolean;
+
+  constructor() {
+    super();
+    this.asking = false;
+  }
+
+  protected override willUpdate(changed: Map<PropertyKey, unknown>): void {
+    // Another grant, or the same one changed, so the question no longer fits.
+    if (changed.has('grant')) {
+      this.asking = false;
+    }
+  }
 
   protected override render(): TemplateResult {
     const { t, grant } = this;
@@ -151,10 +170,11 @@ export class CkAccessCard extends LitElement {
     });
 
     return html`<div class="top">
-        <span class="name">${this.heading}</span>
+        <span class="name" title=${ifDefined(this.headingHint)}>${this.heading}</span>
         <span class="tag">${t.rightsCount.replace('{n}', `${rights.length}`)}</span>
       </div>
       <div class="chips">${RIGHTS.map((right) => this.chip(right, words))}</div>
+      ${this.asking ? this.warning() : nothing}
       <div class="shown">
         <span class="ask">${t.askShown}</span>
         <span class="seg">
@@ -171,10 +191,39 @@ export class CkAccessCard extends LitElement {
       aria-pressed=${this.grant.rights.includes(right)}
       title=${words[right].hint}
       ?disabled=${this.busy}
-      @click=${() => emit(this, 'ck-grant-toggle', { grant: this.grant, chip: right })}
+      @click=${() => this.switchRight(right)}
     >
       ${words[right].name}
     </button>`;
+  }
+
+  /** The last right does not go at once: the person is asked, as the grant goes with it. */
+  private switchRight(right: Right): void {
+    const { rights } = this.grant;
+    if (rights.length === 1 && rights.includes(right)) {
+      this.asking = true;
+      return;
+    }
+    emit(this, 'ck-grant-toggle', { grant: this.grant, chip: right });
+  }
+
+  /** What going on would mean, and the two ways out. */
+  private warning(): TemplateResult {
+    const { t } = this;
+
+    return html`<div class="warn" role="alert">
+      ${t.warnLast}
+      <div class="actions">
+        <button
+          class="button primary"
+          ?disabled=${this.busy}
+          @click=${() => emit(this, 'ck-grant-remove', { grant: this.grant })}
+        >
+          ${t.warnYes}
+        </button>
+        <button class="button" @click=${() => (this.asking = false)}>${t.cancel}</button>
+      </div>
+    </div>`;
   }
 
   /** One of the two ways the members appear; the one already chosen asks for nothing. */

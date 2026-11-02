@@ -12,6 +12,8 @@ export interface PartEvents {
   'ck-remove': undefined;
   'ck-grant-toggle': { readonly grant: Grant; readonly chip: Switch };
   'ck-grant-give': { readonly groupId: string };
+  'ck-grant-give-everywhere': undefined;
+  'ck-grant-remove': { readonly grant: Grant };
   'ck-workpiece-open': { readonly workpiece: Workpiece };
   'ck-workpiece-take-out': { readonly roomId: string; readonly workpieceId: string };
   'ck-workpiece-put-in': { readonly roomId: string; readonly workpieceId: string };

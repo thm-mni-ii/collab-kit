@@ -292,6 +292,21 @@ export class Store {
     });
   }
 
+  /** A group gets access everywhere, which holds in every room; at first only to see. */
+  async giveEverywhere(group: Group): Promise<void> {
+    await this.run(async () => {
+      const grant = await this.ck().grants.set({ groupId: group._id, rights: ['see'] });
+      this.takeNames(grant);
+      this.changeGrants((grants) => [...grants, grant]);
+      this.set({ saved: this.words().savedGive });
+    });
+  }
+
+  /** Takes a grant away whole, once the person has been asked. */
+  async removeGrant(grant: Grant): Promise<void> {
+    await this.run(() => this.dropGrant(grant));
+  }
+
   /** Switches one right of a grant or its flag; without any right left the grant goes. */
   async toggle(grant: Grant, chip: Switch): Promise<void> {
     const rights = chip === 'anonymous' ? [...grant.rights] : switched(grant.rights, chip);
@@ -304,9 +319,7 @@ export class Store {
 
     await this.run(async () => {
       if (rights.length === 0) {
-        await this.ck().grants.remove(which);
-        this.changeGrants((grants) => grants.filter((each) => each._id !== grant._id));
-        this.set({ saved: this.words().savedRemoved });
+        await this.dropGrant(grant);
         return;
       }
       const changed = await this.ck().grants.set({ ...which, rights, anonymous });
@@ -316,6 +329,17 @@ export class Store {
       );
       this.set({ saved: this.words().saved });
     });
+  }
+
+  /** Removes the grant at CK and from what is shown. */
+  private async dropGrant(grant: Grant): Promise<void> {
+    const which =
+      grant.scope === undefined
+        ? { groupId: grant.groupId }
+        : { groupId: grant.groupId, scope: grant.scope };
+    await this.ck().grants.remove(which);
+    this.changeGrants((grants) => grants.filter((each) => each._id !== grant._id));
+    this.set({ saved: this.words().savedRemoved });
   }
 
   /** One of the people findPeople gave becomes a member. */

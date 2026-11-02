@@ -12,6 +12,8 @@ const light = css`
   --accent: var(--ck-accent, #534ab7);
   --on-accent: var(--ck-on-accent, #ffffff);
   --danger: var(--ck-danger, #a32d2d);
+  --warn: var(--ck-warn, #854f0b);
+  --warn-bg: var(--ck-warn-bg, #faeeda);
   color-scheme: light;
 `;
 
@@ -24,6 +26,8 @@ const dark = css`
   --accent: var(--ck-accent, #afa9ec);
   --on-accent: var(--ck-on-accent, #26215c);
   --danger: var(--ck-danger, #f09595);
+  --warn: var(--ck-warn, #fac775);
+  --warn-bg: var(--ck-warn-bg, #412402);
   color-scheme: dark;
 `;
 
@@ -222,6 +226,18 @@ export const base = css`
     padding: 4px 0 0;
     font-size: 12px;
   }
+  .warn {
+    margin-top: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--warn);
+    background: var(--warn-bg);
+    border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent);
+    border-radius: calc(var(--radius) - 2px);
+  }
+  .warn .actions {
+    margin-top: 6px;
+  }
   .error {
     margin-top: 6px;
     font-size: 13px;
@@ -275,15 +291,20 @@ export const frame = css`
     color: var(--text-muted);
   }
   .more {
+    display: grid;
     flex: none;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 8px 20px;
+    max-height: 60%;
     margin-bottom: 12px;
     padding: 10px 14px;
+    overflow-y: auto;
     font-size: 13px;
     background: var(--surface-alt);
     border-radius: var(--radius);
   }
-  .more p + p {
-    margin-top: 4px;
+  .more b {
+    display: block;
   }
   .bar {
     display: flex;
@@ -339,9 +360,11 @@ export const frame = css`
   }
   .tab {
     padding: 6px 14px;
+    border: 1px solid var(--border);
   }
   .tab[aria-selected='true'] {
     background: var(--accent);
+    border-color: var(--accent);
     color: var(--on-accent);
   }
   .item {
