@@ -1,16 +1,14 @@
-/** <ck-management>: the element; it draws what the store holds and hands every action to it. */
+/** <ck-management>: the element; it draws what the store holds, puts the parts together and hands every action to the store. */
 
-import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
+import { LitElement, html, nothing, type TemplateResult } from 'lit';
 
 import type { CollabKitApi, ManagementOpen, ManagementOptions, Room, Workpiece } from '../api.ts';
-import { plus } from './look/icons.ts';
+import { info, plus } from './look/icons.ts';
 import { textsFor, type Texts } from './look/texts.ts';
-import { styles } from './look/theme.ts';
+import { base, frame, tokens } from './look/theme.ts';
+import type { PartEvents } from './parts/events.ts';
+import { roomCount } from './parts/workpiece.ts';
 import { Store, type FormKind, type Tab } from './store.ts';
-import { formView, headView, type FormsView } from './views/forms.ts';
-import { groupView } from './views/groups.ts';
-import { roomView } from './views/rooms.ts';
-import { roomCount, workpieceView } from './views/workpieces.ts';
 
 /** What a tool sets, as properties and the lang attribute; the rest lives in the store. */
 export class Management extends LitElement implements ManagementOptions {
@@ -19,28 +17,94 @@ export class Management extends LitElement implements ManagementOptions {
     newWorkpiece: { attribute: false },
     findPeople: { attribute: false },
     language: { attribute: 'lang' },
+    infoOpen: { state: true },
   };
 
-  static override styles = styles;
+  static override styles = [tokens, base, frame];
 
   declare ck: CollabKitApi | undefined;
   declare newWorkpiece: ManagementOptions['newWorkpiece'];
   declare findPeople: ManagementOptions['findPeople'];
   /** The lang attribute; left out, the one of the page counts. */
   declare language: string | undefined;
+  /** Whether the longer explanation under the title is shown. */
+  declare infoOpen: boolean;
 
   /** Data and calls to CK; it has the element drawn again on every change. */
   private readonly store = new Store(this, () => this.t);
 
-  /** The form open at the last drawing, so a newly opened one takes the typing. */
-  private shownForm: FormKind | undefined = undefined;
+  constructor() {
+    super();
+    this.infoOpen = false;
+    // What the parts ask for goes to the store, and no further than here.
+    this.listen('ck-form-open', ({ kind }) => this.store.openForm(kind));
+    this.listen('ck-form-close', () => this.store.closeForm());
+    this.listen('ck-form-input', () => this.store.clearError());
+    this.listen(
+      'ck-form-submit',
+      ({ kind, text, choice }) => void this.store.submit(kind, text, choice),
+    );
+    this.listen('ck-remove', () => void this.store.removePlace());
+    this.listen('ck-grant-toggle', ({ grant, chip }) => void this.store.toggle(grant, chip));
+    this.listen('ck-grant-give', ({ groupId }) => {
+      const room = this.store.room();
+      if (room !== undefined) {
+        void this.store.give(room, groupId);
+      }
+    });
+    this.listen('ck-grant-give-everywhere', () => {
+      const group = this.store.group();
+      if (group !== undefined) {
+        void this.store.giveEverywhere(group);
+      }
+    });
+    this.listen('ck-grant-remove', ({ grant }) => void this.store.removeGrant(grant));
+    this.listen('ck-workpiece-open', ({ workpiece }) => {
+      const room = this.store.room();
+      if (room !== undefined) {
+        this.open(workpiece, room);
+      }
+    });
+    this.listen('ck-workpiece-take-out', ({ roomId, workpieceId }) => {
+      const room = this.store.state.rooms.find((each) => each._id === roomId);
+      if (room !== undefined) {
+        void this.store.takeOut(room, workpieceId);
+      }
+    });
+    this.listen('ck-workpiece-put-in', ({ roomId, workpieceId }) => {
+      void this.store.putIn(roomId, workpieceId);
+    });
+    this.listen('ck-member-pick', ({ person }) => {
+      const group = this.store.group();
+      if (group !== undefined) {
+        void this.store.pick(group, person);
+      }
+    });
+    this.listen('ck-member-dismiss', ({ actorId }) => {
+      const group = this.store.group();
+      if (group !== undefined) {
+        void this.store.dismiss(group, actorId);
+      }
+    });
+  }
 
   /** The words in the language of the element, else of the page. */
   private get t(): Texts {
     return textsFor(this.language ?? document.documentElement.lang);
   }
 
-  protected override willUpdate(changed: PropertyValues): void {
+  /** Takes an event of a part and hands what it carries on. */
+  private listen<Name extends keyof PartEvents>(
+    name: Name,
+    handle: (detail: PartEvents[Name]) => void,
+  ): void {
+    this.addEventListener(name, (event) => {
+      event.stopPropagation();
+      handle(event.detail as PartEvents[Name]);
+    });
+  }
+
+  protected override willUpdate(changed: Map<PropertyKey, unknown>): void {
     // Another ck may be another person, so everything is asked for anew.
     if (changed.has('ck')) {
       void this.store.load();
@@ -48,13 +112,8 @@ export class Management extends LitElement implements ManagementOptions {
   }
 
   protected override updated(): void {
-    const { busy, form } = this.store.state;
     // Tells screen readers, and whoever waits, that calls to CK are under way.
-    this.toggleAttribute('aria-busy', busy);
-    if (form !== undefined && form.kind !== this.shownForm) {
-      this.renderRoot.querySelector<HTMLInputElement>('form input')?.focus();
-    }
-    this.shownForm = form?.kind;
+    this.toggleAttribute('aria-busy', this.store.state.busy);
   }
 
   protected override render(): TemplateResult | typeof nothing {
@@ -62,14 +121,28 @@ export class Management extends LitElement implements ManagementOptions {
       return nothing;
     }
     const { t } = this;
-    const { tab, failure, mayCreate } = this.store.state;
+    const { tab, failure, saved, mayCreate } = this.store.state;
 
     return html`<div class="frame">
+      <div class="title">
+        <h1>${t.title}</h1>
+        <button
+          class="info"
+          aria-label=${t.infoToggle}
+          aria-expanded=${this.infoOpen}
+          @click=${() => (this.infoOpen = !this.infoOpen)}
+        >
+          ${info}
+        </button>
+      </div>
+      <p class="subtitle">${t.intro}</p>
+      ${this.infoOpen ? this.infoView(t) : nothing}
       <div class="bar" role="tablist">
         ${this.tabButton('rooms', t.rooms)} ${this.tabButton('groups', t.groups)}
         ${mayCreate ? this.tabButton('workpieces', t.workpieces) : nothing}
       </div>
       ${failure === undefined ? nothing : html`<p class="error banner" role="alert">${failure}</p>`}
+      ${saved === undefined ? nothing : html`<p class="hint banner" role="status">${saved}</p>`}
       <div class="body">
         <div class="list">${tab === 'workpieces' ? this.workpieceList(t) : this.listView(t)}</div>
         <div class="detail">
@@ -85,6 +158,23 @@ export class Management extends LitElement implements ManagementOptions {
     </div>`;
   }
 
+  /** The longer explanation: the words of the panel and the rules that are not to be seen in it. */
+  private infoView(t: Texts): TemplateResult {
+    const entries = [
+      [t.glossRoom, t.glossRoomText],
+      [t.glossWorkpiece, t.glossWorkpieceText],
+      [t.glossGroup, t.glossGroupText],
+      [t.glossAccess, t.glossAccessText],
+      [t.glossEverywhere, t.glossEverywhereText],
+      [t.glossPerson, t.glossPersonText],
+      [t.glossCreate, t.glossCreateText],
+    ];
+
+    return html`<div class="more">
+      ${entries.map(([term, text]) => html`<p><b>${term}</b> ${text}</p>`)}
+    </div>`;
+  }
+
   private tabButton(tab: Tab, label: string): TemplateResult {
     return html`<button
       class="tab"
@@ -96,6 +186,36 @@ export class Management extends LitElement implements ManagementOptions {
     </button>`;
   }
 
+  /** The button at the top of a list that opens the form to create one, and the form once open. */
+  private createBlock(
+    t: Texts,
+    kind: FormKind,
+    label: string,
+    placeholder: string,
+    choices?: readonly { readonly value: string; readonly label: string }[],
+  ): TemplateResult {
+    const { form, busy } = this.store.state;
+
+    return html`<div class="create">
+      <button class="link" @click=${() => this.store.openForm(kind)}>${plus} ${label}</button>
+      ${
+        form?.kind === kind
+          ? html`<ck-form
+              block
+              .t=${t}
+              .kind=${kind}
+              .placeholder=${placeholder}
+              .label=${t.create}
+              .busy=${busy}
+              .error=${form.error}
+              .choices=${choices}
+              .choiceLabel=${t.inRoom}
+            ></ck-form>`
+          : nothing
+      }
+    </div>`;
+  }
+
   /** The rooms or the groups the person sees, and creating one with manage everywhere. */
   private listView(t: Texts): TemplateResult {
     const { tab, loaded, mayCreate, selected } = this.store.state;
@@ -103,63 +223,76 @@ export class Management extends LitElement implements ManagementOptions {
     const items: readonly { readonly _id: string; readonly name: string }[] = rooms
       ? this.store.state.rooms
       : this.store.state.groups;
-    const forms = this.forms(t);
 
     return html`
       ${
-        !loaded
-          ? html`<p class="empty">${t.loading}</p>`
-          : items.length === 0
-            ? html`<p class="empty">${rooms ? t.noRooms : t.noGroups}</p>`
-            : items.map(
-                (item) =>
-                  html`<button
-                    class="item"
-                    aria-current=${item._id === selected[tab]}
-                    @click=${() => void this.store.select(item._id)}
-                  >
-                    ${item.name}
-                  </button>`,
-              )
-      }
-      ${
         mayCreate
-          ? html`<button class="link" @click=${() => this.store.openForm(rooms ? 'room' : 'group')}>
-                ${plus} ${rooms ? t.newRoom : t.newGroup}
-              </button>
-              ${
-                rooms
-                  ? formView(forms, 'room', t.roomName, t.create)
-                  : formView(forms, 'group', t.groupName, t.create)
-              }`
+          ? rooms
+            ? this.createBlock(t, 'room', t.newRoom, t.roomName)
+            : this.createBlock(t, 'group', t.newGroup, t.groupName)
           : nothing
       }
+      <div class="items">
+        ${
+          !loaded
+            ? html`<p class="empty">${t.loading}</p>`
+            : items.length === 0
+              ? html`<p class="empty">${rooms ? t.noRooms : t.noGroups}</p>`
+              : items.map(
+                  (item) =>
+                    html`<button
+                      class="item"
+                      aria-current=${item._id === selected[tab]}
+                      @click=${() => void this.store.select(item._id)}
+                    >
+                      ${item.name}
+                    </button>`,
+                )
+        }
+      </div>
     `;
   }
 
   /** Every workpiece, forks under their source, and how many rooms each lies in. */
   private workpieceList(t: Texts): TemplateResult {
     const { store } = this;
-    const { loaded, selected } = store.state;
+    const { loaded, selected, rooms } = store.state;
     const entries = store.entries();
+    // A workpiece is made by the tool and lies in a room, so both must be there.
+    const creates = this.newWorkpiece !== undefined && rooms.length > 0;
 
-    if (!loaded) {
-      return html`<p class="empty">${t.loading}</p>`;
-    }
-    if (entries.length === 0) {
-      return html`<p class="empty">${t.noWorkpiecesAtAll}</p>`;
-    }
-    return html`${entries.map(
-      ({ workpiece, fork }) =>
-        html`<button
-          class="item ${fork ? 'fork' : ''}"
-          aria-current=${workpiece._id === selected.workpieces}
-          @click=${() => void store.select(workpiece._id)}
-        >
-          <span class="name">${workpiece.name}</span>
-          <span class="sub">${roomCount(t, store.roomsOf(workpiece._id).length)}</span>
-        </button>`,
-    )}`;
+    return html`
+      ${
+        creates
+          ? this.createBlock(
+              t,
+              'workpiece',
+              t.newWorkpiece,
+              t.workpieceName,
+              rooms.map((room) => ({ value: room._id, label: room.name })),
+            )
+          : nothing
+      }
+      <div class="items">
+        ${
+          !loaded
+            ? html`<p class="empty">${t.loading}</p>`
+            : entries.length === 0
+              ? html`<p class="empty">${t.noWorkpiecesAtAll}</p>`
+              : entries.map(
+                  ({ workpiece, fork }) =>
+                    html`<button
+                      class="item ${fork ? 'fork' : ''}"
+                      aria-current=${workpiece._id === selected.workpieces}
+                      @click=${() => void store.select(workpiece._id)}
+                    >
+                      <span class="name">${workpiece.name}</span>
+                      <span class="sub">${roomCount(t, store.roomsOf(workpiece._id).length)}</span>
+                    </button>`,
+                )
+        }
+      </div>
+    `;
   }
 
   private workpieceDetail(t: Texts): TemplateResult | typeof nothing {
@@ -170,18 +303,16 @@ export class Management extends LitElement implements ManagementOptions {
     }
     const { forkOf } = workpiece;
 
-    return workpieceView({
-      t,
-      workpiece,
-      source: forkOf === undefined ? undefined : store.state.workpieces.get(forkOf.id),
-      rooms: store.state.rooms,
-      groups: store.state.groups,
-      use: store.state.use,
-      names: store.state.names,
-      busy: store.state.busy,
-      putIn: (roomId) => void store.putIn(roomId, workpiece._id),
-      takeOut: (room) => void store.takeOut(room, workpiece._id),
-    });
+    return html`<ck-workpiece-detail
+      .t=${t}
+      .workpiece=${workpiece}
+      .source=${forkOf === undefined ? undefined : store.state.workpieces.get(forkOf.id)}
+      .rooms=${store.state.rooms}
+      .groups=${store.state.groups}
+      .use=${store.state.use}
+      .names=${store.state.names}
+      .busy=${store.state.busy}
+    ></ck-workpiece-detail>`;
   }
 
   private roomDetail(t: Texts): TemplateResult | typeof nothing {
@@ -191,27 +322,19 @@ export class Management extends LitElement implements ManagementOptions {
       return nothing;
     }
     const detail = store.detailOf(room._id);
-    const manages = detail?.rights.includes('manage') === true;
-    const forms = this.forms(t);
 
-    return roomView({
-      t,
-      room,
-      head: headView(forms, room.name, manages, t.roomName, t.removeRoom),
-      workpieces: store.state.workpieces,
-      groups: store.state.groups,
-      manages,
-      edits: detail?.rights.includes('edit') === true,
-      grants: detail?.grants,
-      creates: this.newWorkpiece !== undefined,
-      busy: store.state.busy,
-      form: (kind, placeholder, label, value) => formView(forms, kind, placeholder, label, value),
-      openForm: (kind) => store.openForm(kind),
-      open: (workpiece) => this.open(workpiece, room),
-      takeOut: (workpieceId) => void store.takeOut(room, workpieceId),
-      toggle: (grant, chip) => void store.toggle(grant, chip),
-      give: (groupId) => void store.give(room, groupId),
-    });
+    return html`<ck-room-detail
+      .t=${t}
+      .room=${room}
+      .workpieces=${store.state.workpieces}
+      .groups=${store.state.groups}
+      .manages=${detail?.rights.includes('manage') === true}
+      .edits=${detail?.rights.includes('edit') === true}
+      .grants=${detail?.grants}
+      .creates=${this.newWorkpiece !== undefined}
+      .busy=${store.state.busy}
+      .form=${store.state.form}
+    ></ck-room-detail>`;
   }
 
   private groupDetail(t: Texts): TemplateResult | typeof nothing {
@@ -221,43 +344,19 @@ export class Management extends LitElement implements ManagementOptions {
       return nothing;
     }
     const detail = store.detailOf(group._id);
-    const manages = detail?.rights.includes('manage') === true;
-    const { form } = store.state;
-    const forms = this.forms(t);
 
-    return groupView({
-      t,
-      group,
-      head: headView(forms, group.name, manages, t.groupName, t.removeGroup),
-      names: store.state.names,
-      manages,
-      grants: detail?.grants,
-      searches: this.findPeople !== undefined,
-      found: form?.kind === 'member' ? form.found : undefined,
-      busy: store.state.busy,
-      form: (kind, placeholder, label, value) => formView(forms, kind, placeholder, label, value),
-      placeName: (scope) => store.placeName(scope),
-      openForm: (kind) => store.openForm(kind),
-      pick: (person) => void store.pick(group, person),
-      dismiss: (actorId) => void store.dismiss(group, actorId),
-      toggle: (grant, chip) => void store.toggle(grant, chip),
-    });
-  }
-
-  /** What the head and the forms need: the open form, and the store behind them. */
-  private forms(t: Texts): FormsView {
-    const { store } = this;
-
-    return {
-      t,
-      form: store.state.form,
-      busy: store.state.busy,
-      openForm: (kind) => store.openForm(kind),
-      closeForm: () => store.closeForm(),
-      clearError: () => store.clearError(),
-      submit: (kind, text) => void store.submit(kind, text),
-      removePlace: () => void store.removePlace(),
-    };
+    return html`<ck-group-detail
+      .t=${t}
+      .group=${group}
+      .names=${store.state.names}
+      .manages=${detail?.rights.includes('manage') === true}
+      .grants=${detail?.grants}
+      .searches=${this.findPeople !== undefined}
+      .mayEverywhere=${store.state.mayCreate}
+      .busy=${store.state.busy}
+      .form=${store.state.form}
+      .placeName=${(scope: Parameters<Store['placeName']>[0]) => store.placeName(scope)}
+    ></ck-group-detail>`;
   }
 
   /** Tells the tool which workpiece to open; what opening means is up to it. */
