@@ -1,6 +1,7 @@
 /** Runtime configuration, read once at startup so a bad variable fails right away. */
 import { isTokenAlgorithm, TOKEN_ALGORITHMS, usesSharedSecret } from './auth/token.ts';
 import type { TokenAlgorithm, TopClaim } from './auth/token.ts';
+import { isServiceKey, SERVICE_PREFIX } from './model/actor.ts';
 import { defined } from './utils/optional.ts';
 
 const NODE_ENVS = ['development', 'test', 'production'] as const;
@@ -15,6 +16,8 @@ export interface ServiceSource {
   readonly issuer: string;
   readonly algorithm: TokenAlgorithm;
   readonly key: TokenKey;
+  /** The key its tokens carry as sub; set, it gets the group of services at startup. */
+  readonly actor?: string;
 }
 
 export interface Config {
@@ -190,9 +193,12 @@ function readService(
   problems: string[],
 ): ServiceSource | undefined {
   const issuer = optionalValue(env, 'SERVICE_ISSUER');
-  const others = ['SERVICE_ALGORITHM', 'SERVICE_PUBLIC_KEY', 'SERVICE_JWKS_URI'].filter(
-    (name) => optionalValue(env, name) !== undefined,
-  );
+  const others = [
+    'SERVICE_ALGORITHM',
+    'SERVICE_PUBLIC_KEY',
+    'SERVICE_JWKS_URI',
+    'SERVICE_ACTOR',
+  ].filter((name) => optionalValue(env, name) !== undefined);
 
   if (issuer === undefined) {
     if (others.length > 0) {
@@ -211,7 +217,17 @@ function readService(
     problems.push(`SERVICE_ALGORITHM must be an RS, PS or ES algorithm, got "${algorithm}"`);
     return undefined;
   }
-  return { issuer, algorithm, key: readTokenKey(env, 'SERVICE', algorithm, problems) };
+
+  const actor = optionalValue(env, 'SERVICE_ACTOR');
+  if (actor !== undefined && !isServiceKey(actor)) {
+    problems.push(`SERVICE_ACTOR must begin with ${SERVICE_PREFIX}, got "${actor}"`);
+  }
+  return {
+    issuer,
+    algorithm,
+    key: readTokenKey(env, 'SERVICE', algorithm, problems),
+    ...defined({ actor }),
+  };
 }
 
 /** TOP_CLAIM with TOP_VALUES, both or neither; half of it would quietly put nobody at the top. */

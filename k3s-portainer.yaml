@@ -227,6 +227,9 @@ spec:
               value: ''
             - name: SERVICE_PUBLIC_KEY
               value: ''
+            # Key of the service (sub of its tokens), begins with service-; blank means no group.
+            - name: SERVICE_ACTOR
+              value: ''
           envFrom:
             - configMapRef:
                 name: collab-kit-config
