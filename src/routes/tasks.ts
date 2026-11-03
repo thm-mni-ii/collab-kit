@@ -40,7 +40,7 @@ import {
 import { defined } from '../utils/optional.ts';
 import { actorOf, bodyOf, fail, guard, idOf, requireId, unusableField } from './http.ts';
 
-/** Each task goes out masked at itself, where manage lets the reader see through. */
+/** Each task goes out masked at itself, unless the reader sees through. */
 const TASKS = { placeOf: itself('task') };
 
 /** Task, review, revision and approval alike: something to be done, by someone, with a state. */
@@ -192,7 +192,7 @@ export function taskRoutes(db: Db, decisions: readonly string[]): Router {
       anchor ?? (parent === undefined ? undefined : { kind: 'task' as const, id: parent });
     const unstamped =
       assignee?.kind === 'actor' && place !== undefined
-        ? await unstampedFor(db, actor, assignee.id, place)
+        ? await unstampedFor(db, actor, assignee.id)
         : undefined;
     const tasks = await readTasks(
       db,

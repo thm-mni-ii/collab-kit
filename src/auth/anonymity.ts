@@ -66,34 +66,33 @@ export async function eventStamps(db: Db, event: NewEvent): Promise<Stamp[]> {
   return stampsFor(db, keys, { places: [place], about, ...defined({ known }) });
 }
 
-/** Who reads an answer: sees their own key, and true keys behind pseudonyms where they manage. */
+/** Whether the actor sees the true keys behind pseudonyms: only with manage everywhere, not at a place. */
+export function seesThroughEverywhere(db: Db, actor: Actor): Promise<boolean> {
+  return may(db, actor, 'manage');
+}
+
+/** Who reads an answer: sees their own key, and true keys behind pseudonyms with manage everywhere. */
 export function readerOf(db: Db, actor: Actor): Reader {
-  // Asked once per place, however many entries of the answer lie there.
-  const asked = new Map<string, Promise<boolean>>();
+  // Asked once, however many entries of the answer there are.
+  let asked: Promise<boolean> | undefined;
 
   return {
     actorId: actor.actorId,
-    seesThrough: (place) => {
-      const key = `${place.kind}:${place.id.toHexString()}`;
-      const answer = asked.get(key) ?? may(db, actor, 'manage', place);
-      asked.set(key, answer);
-      return answer;
-    },
+    seesThrough: () => (asked ??= seesThroughEverywhere(db, actor)),
   };
 }
 
-/** The key a filter must not find behind a stamp: somebody else's, where the reader does not manage. */
+/** The key a filter must not find behind a stamp: somebody else's, unless the reader sees through. */
 export async function unstampedFor(
   db: Db,
   actor: Actor,
   key: string | undefined,
-  place: Reference,
 ): Promise<string | undefined> {
   if (key === undefined || key === actor.actorId) {
     return undefined;
   }
   // Otherwise the filter would say whose the pseudonym is that it finds.
-  return (await may(db, actor, 'manage', place)) ? undefined : key;
+  return (await seesThroughEverywhere(db, actor)) ? undefined : key;
 }
 
 /** Whether the actor writes anonymously at the place, as the flag says now; for GET /me/anonymous. */

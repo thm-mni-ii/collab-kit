@@ -28,7 +28,7 @@ import type { Reference } from '../model/anchor.ts';
 import { defined } from '../utils/optional.ts';
 import { actorOf, bodyOf, fail, guard, idOf, requireId, unusableField } from './http.ts';
 
-/** Each comment goes out masked at itself, where manage lets the reader see through. */
+/** Each comment goes out masked at itself, unless the reader sees through. */
 const COMMENTS = { placeOf: itself('comment') };
 
 /** Comment, feedback, message and reaction alike: one form, told apart by kind. */
@@ -145,7 +145,7 @@ export function commentRoutes(db: Db, decisions: readonly string[]): Router {
       return fail(response, 404, 'unknown anchor');
     }
 
-    const unstamped = await unstampedFor(db, actor, createdBy, anchor);
+    const unstamped = await unstampedFor(db, actor, createdBy);
     const comments = await readComments(db, {
       anchor,
       ...defined({ parentId, kind, state, createdBy, unstamped, since }),

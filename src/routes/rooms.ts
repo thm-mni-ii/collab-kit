@@ -184,7 +184,7 @@ export function roomRoutes(db: Db, hub: WorkpieceHub, recheckAccess: () => Promi
     const actor = actorOf(request);
     const id = idOf(request);
     const references = await bundledIn(db, actor, id);
-    const unstamped = await unstampedFor(db, actor, createdBy, { kind: 'room', id });
+    const unstamped = await unstampedFor(db, actor, createdBy);
     const events = await readEventsSince(db, {
       references,
       ...defined({ since, kind, createdBy, limit, unstamped }),
