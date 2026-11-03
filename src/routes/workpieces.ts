@@ -22,7 +22,7 @@ import { asCount, asObject, asObjectId, asText, asUnits } from '../utils/input.t
 import { defined } from '../utils/optional.ts';
 import { actorOf, bodyOf, fail, guard, idOf, requireId, unusableField } from './http.ts';
 
-/** Each workpiece goes out masked at itself, where manage lets the reader see through. */
+/** Each workpiece goes out masked at itself, unless the reader sees through. */
 const WORKPIECES = { placeOf: itself('workpiece') };
 
 /** The workpiece as a thing; typing runs over the WebSocket, here only a merge writes into one. */
@@ -146,7 +146,6 @@ export function workpieceRoutes(db: Db, hub: WorkpieceHub, logger: Logger): Rout
       return fail(response, 400, `${unusable} is unusable`);
     }
 
-    // Every change lies at the workpiece, so manage there lets the reader see through.
     const id = idOf(request);
     response.json(
       await withNames(

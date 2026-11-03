@@ -53,7 +53,7 @@ export function eventRoutes(db: Db): Router {
       return fail(response, 404, 'unknown anchor');
     }
 
-    const unstamped = await unstampedFor(db, actor, createdBy, anchor);
+    const unstamped = await unstampedFor(db, actor, createdBy);
     const query = { anchor, ...defined({ kind, createdBy, unstamped, before, limit }) };
 
     // With a cut a stream, read forwards; without one a history, read backwards.

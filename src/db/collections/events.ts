@@ -224,7 +224,7 @@ export interface Activity {
   /** When the newest event of this person happened. */
   at: Date;
   kind: string;
-  /** Where that event hangs, so manage there decides who sees through; never passed on. */
+  /** Where that event hangs, as the newest trace puts it; never passed on. */
   anchor: Anchor;
   /** The pseudonym, when the person left these traces anonymously; open ones are a row apart. */
   anonymous?: Stamp[];
@@ -295,7 +295,7 @@ export async function latestPerActor(
     .toArray();
 }
 
-/** An activity as it goes out: where its newest trace hangs only decided who sees through. */
+/** An activity as it goes out, without the anchor of its newest trace. */
 export function withoutAnchor<T extends { readonly anchor: Anchor }>(
   activity: T,
 ): Omit<T, 'anchor'> {

@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import * as Y from 'yjs';
 
+import { seesThroughEverywhere } from '../../src/auth/anonymity.ts';
 import { createTokenCheck } from '../../src/auth/token.ts';
 import { applyDefinitions } from '../../src/db/apply.ts';
 import { connect, type Storage } from '../../src/db/client.ts';
@@ -92,6 +93,21 @@ async function seminar(): Promise<Seminar> {
     setBy: 'alice',
   });
   return { roomId: room._id, workpieceId: workpiece._id, bobs: bobs._id, carols: carols._id };
+}
+
+/** A host who manages the room of the seminar, but not everywhere, as the actor of this name. */
+async function host(roomId: ObjectId, actor: string): Promise<void> {
+  const hosts = await createGroup(storage.db, {
+    name: `Hosts ${actor}`,
+    createdBy: 'alice',
+    members: [actor],
+  });
+  await setGrant(storage.db, {
+    groupId: hosts._id,
+    scope: { kind: 'room', id: roomId },
+    rights: [...WRITING, 'manage'],
+    setBy: 'alice',
+  });
 }
 
 /** Says something about the workpiece as this person and gives the stored comment. */
@@ -609,7 +625,7 @@ describe('forks and merges', () => {
 });
 
 describe('what goes out', () => {
-  it('shows others a pseudonym without a name, the person themselves and manage the true key', async () => {
+  it('shows others a pseudonym without a name, the person themselves and manage everywhere the true key', async () => {
     const { workpieceId } = await seminar();
     await say('carol', workpieceId);
     await say('bob', workpieceId);
@@ -639,6 +655,28 @@ describe('what goes out', () => {
       expect(shown).toMatchObject({ createdBy: 'carol', names: { carol: 'carol' } });
       expect(shown?.['anonymous']).toBeUndefined();
     }
+  });
+
+  it('shows a pseudonym to manage at the room only, and to the top', async () => {
+    const { roomId, workpieceId } = await seminar();
+    await host(roomId, 'dora');
+    await say('carol', workpieceId);
+    const query = { anchorKind: 'workpiece', anchorId: workpieceId.toHexString() };
+    const pseudonym = await pseudonymOf(
+      storage.db,
+      { kind: 'workpiece', id: workpieceId },
+      'carol',
+    );
+
+    const [shown] = (await read('dora', '/comments', query)).body as Record<string, unknown>[];
+    expect(shown).toMatchObject({ createdBy: pseudonym });
+    expect(shown?.['names']).toBeUndefined();
+    // The filter must not find the true key either.
+    expect((await read('dora', '/comments', { ...query, createdBy: 'carol' })).body).toEqual([]);
+
+    expect(await seesThroughEverywhere(storage.db, { actorId: 'dora' })).toBe(false);
+    expect(await seesThroughEverywhere(storage.db, { actorId: 'alice' })).toBe(true);
+    expect(await seesThroughEverywhere(storage.db, { actorId: 'zed', top: true })).toBe(true);
   });
 
   it('masks the traces, the changes and the persons given a task alike', async () => {
@@ -757,7 +795,7 @@ describe('what goes out', () => {
 });
 
 describe('what goes out over the socket', () => {
-  it('sets person from the token, masked unless it is the own one or the reader manages', async () => {
+  it('sets person from the token, masked unless it is the own one or the reader manages everywhere', async () => {
     const { roomId, workpieceId } = await seminar();
     const pseudonym = await pseudonymOf(
       storage.db,
@@ -796,6 +834,26 @@ describe('what goes out over the socket', () => {
     }
   });
 
+  it('masks person for a host who manages the room only', async () => {
+    const { roomId, workpieceId } = await seminar();
+    await host(roomId, 'dora');
+    const pseudonym = await pseudonymOf(
+      storage.db,
+      { kind: 'workpiece', id: workpieceId },
+      'carol',
+    );
+    const carol = await watch(workpieceId, 'carol');
+    const dora = await watch(workpieceId, 'dora');
+
+    carol.socket.send(presence(601, 1, { cursor: 5 }));
+    expect(await waitFor(() => dora.seen.has(601))).toBe(true);
+    expect(dora.seen.get(601)).toEqual({ cursor: 5, person: { id: pseudonym } });
+
+    for (const watcher of [carol, dora]) {
+      watcher.socket.close();
+    }
+  });
+
   it('tells a conflict at once, each listener seeing it as they may', async () => {
     const { workpieceId } = await seminar();
     const pseudonym = await pseudonymOf(
@@ -822,18 +880,14 @@ describe('what goes out over the socket', () => {
     await Promise.all([alice.close(), carol.close(), bob.close()]);
   });
 
-  it('closes with 4409 when the reader comes to manage the workpiece, so it sees anew', async () => {
-    const { roomId, workpieceId, bobs } = await seminar();
+  it('closes with 4409 when the reader comes to manage everywhere, so it sees anew', async () => {
+    const { workpieceId, bobs } = await seminar();
     const bob = await open(workpieceId, 'bob');
 
     await request(server)
       .put('/grants')
       .set(as('alice'))
-      .send({
-        groupId: bobs.toHexString(),
-        scope: { kind: 'room', id: roomId.toHexString() },
-        rights: [...WRITING, 'manage'],
-      });
+      .send({ groupId: bobs.toHexString(), rights: [...WRITING, 'manage'] });
 
     expect(await bob.closed).toBe(4409);
   });
