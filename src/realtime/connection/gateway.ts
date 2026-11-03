@@ -6,8 +6,8 @@ import type { Logger } from 'pino';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import type { Actor } from '../../model/actor.ts';
-import { may, workpieceAccess } from '../../auth/access.ts';
-import { writesAs } from '../../auth/anonymity.ts';
+import { workpieceAccess } from '../../auth/access.ts';
+import { seesThroughEverywhere, writesAs } from '../../auth/anonymity.ts';
 import { asObjectId } from '../../utils/input.ts';
 import { defined } from '../../utils/optional.ts';
 import { isAllowedOrigin } from '../../utils/origin.ts';
@@ -150,8 +150,7 @@ export function attachGateway(options: GatewayOptions): Gateway {
               ws.close(4403, 'access withdrawn');
             } else if (
               (access === 'write') !== admitted.mayWrite ||
-              (await seesThroughAt(options.db, admitted.actor, admitted.workpieceId)) !==
-                admitted.seesThrough
+              (await seesThroughEverywhere(options.db, admitted.actor)) !== admitted.seesThrough
             ) {
               // A fresh connection is admitted with the new rights, Yjs loses nothing on the way.
               options.logger.info(who, 'rights changed, connection closed');
@@ -424,7 +423,7 @@ async function admit(
   const wantsEvents = new URLSearchParams(query).get('events') === '1';
   const [pseudonym, seesThrough] = await Promise.all([
     writesAs(options.db, actor.actorId, workpieceId),
-    seesThroughAt(options.db, actor, workpieceId),
+    seesThroughEverywhere(options.db, actor),
   ]);
   return {
     workpieceId,
@@ -434,11 +433,6 @@ async function admit(
     wantsEvents,
     ...defined({ pseudonym }),
   };
-}
-
-/** Whether the actor manages the workpiece, which lets them see the true keys behind pseudonyms. */
-function seesThroughAt(db: Db, actor: Actor, workpieceId: ObjectId): Promise<boolean> {
-  return may(db, actor, 'manage', { kind: 'workpiece', id: workpieceId });
 }
 
 /** A catch for work nobody waits for: a failure is logged instead of ending the process. */
