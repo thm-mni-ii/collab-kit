@@ -165,6 +165,21 @@ describe('readConfig', () => {
     expect(config).toMatchObject({ top: { claim: 'globalRole', values: ['ADMIN', 'MODERATOR'] } });
   });
 
+  it('lets the top see through pseudonyms unless TOP_SEES_PSEUDONYMS is false', () => {
+    const top = { ...valid, TOP_CLAIM: 'globalRole', TOP_VALUES: 'ADMIN' };
+
+    expect(readConfig(top).top).not.toHaveProperty('seesPseudonyms');
+    expect(readConfig({ ...top, TOP_SEES_PSEUDONYMS: 'true' }).top).not.toHaveProperty(
+      'seesPseudonyms',
+    );
+    expect(readConfig({ ...top, TOP_SEES_PSEUDONYMS: ' false ' }).top).toMatchObject({
+      seesPseudonyms: false,
+    });
+    expect(() => readConfig({ ...top, TOP_SEES_PSEUDONYMS: 'no' })).toThrowError(
+      /TOP_SEES_PSEUDONYMS must be true or false/,
+    );
+  });
+
   it('puts nobody at the top while both top variables are blank', () => {
     expect(readConfig({ ...valid, TOP_CLAIM: ' ', TOP_VALUES: ' , ' })).not.toHaveProperty('top');
   });

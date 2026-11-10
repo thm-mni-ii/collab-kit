@@ -39,7 +39,7 @@ export interface Config {
   readonly actorClaim: string;
   /** Claim that holds the name to show. */
   readonly labelClaim: string;
-  /** TOP_CLAIM and TOP_VALUES: who may everything everywhere; left out, nobody. */
+  /** TOP_CLAIM, TOP_VALUES and TOP_SEES_PSEUDONYMS: who may everything everywhere; left out, nobody. */
   readonly top?: TopClaim;
   /** SERVICE_*: a second source, whose tokens a service signs itself; left out, there is none. */
   readonly service?: ServiceSource;
@@ -235,6 +235,12 @@ function readTop(env: NodeJS.ProcessEnv, problems: string[]): TopClaim | undefin
   const claim = optionalValue(env, 'TOP_CLAIM');
   const values = optionalList(env, 'TOP_VALUES');
 
+  // Blank means true, so an instance without the variable shows the top what it showed before.
+  const seesRaw = optionalValue(env, 'TOP_SEES_PSEUDONYMS') ?? 'true';
+  if (seesRaw !== 'true' && seesRaw !== 'false') {
+    problems.push(`TOP_SEES_PSEUDONYMS must be true or false, got "${seesRaw}"`);
+  }
+
   if (claim === undefined && values === undefined) {
     return undefined;
   }
@@ -242,7 +248,7 @@ function readTop(env: NodeJS.ProcessEnv, problems: string[]): TopClaim | undefin
     problems.push('set TOP_CLAIM and TOP_VALUES together, or neither');
     return undefined;
   }
-  return { claim, values };
+  return { claim, values, ...(seesRaw === 'false' ? { seesPseudonyms: false as const } : {}) };
 }
 
 /** A size in whole bytes up to 15 MiB, undefined when not set; anything else is a problem. */

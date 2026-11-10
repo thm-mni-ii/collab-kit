@@ -6,7 +6,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 // First, so the page is there before Lit loads.
 import { page } from './page.ts';
-import type { CollabKitApi, ManagementOpen, ManagementOptions } from '../../../client/src/api.ts';
+import type {
+  CollabKitApi,
+  ManagementElement,
+  ManagementOpen,
+  ManagementOptions,
+} from '../../../client/src/api.ts';
 import { createCollabKitApi } from '../../../client/src/index.ts';
 import '../../../client/src/manage/index.ts';
 import { createTokenCheck } from '../../../src/auth/token.ts';
@@ -28,7 +33,7 @@ const database = `collab_kit_client_manage_${Date.now()}_${Math.random().toStrin
 const silent = pino({ level: 'silent' });
 
 /** The element as a tool sees it, and what a test waits on. */
-type Management = HTMLElement & ManagementOptions & { readonly updateComplete: Promise<boolean> };
+type Management = HTMLElement & ManagementElement & { readonly updateComplete: Promise<boolean> };
 
 let storage: Storage;
 let gateway: Gateway;
@@ -512,5 +517,45 @@ describe('<ck-management>', () => {
     expect(await alice.grants.list({ scope: { kind: 'room', id: room._id } })).toMatchObject([
       { rights: ['see', 'manage'] },
     ]);
+  });
+
+  it('shows a tab of the tool as its slot over the full width, and goes back to the own ones', async () => {
+    const element = await mount(alice, { extraTabs: [{ id: 'import', label: 'Import' }] });
+    const content = document.createElement('p');
+    content.slot = 'import';
+    element.append(content);
+
+    const labels = find(rootOf(element), '.bar button').map((each) => each.textContent?.trim());
+    expect(labels).toEqual(['Räume', 'Gruppen', 'Werkstücke', 'Import']);
+
+    await click(element, 'Import');
+    expect(button(element, 'Import').getAttribute('aria-selected')).toBe('true');
+    expect(button(element, 'Räume').getAttribute('aria-selected')).toBe('false');
+    expect(rootOf(element).querySelector('.body')).toBeNull();
+    expect(rootOf(element).querySelector('.extra slot')?.getAttribute('name')).toBe('import');
+
+    await click(element, 'Räume');
+    expect(rootOf(element).querySelector('.extra')).toBeNull();
+    expect(rootOf(element).querySelector('.body')).not.toBeNull();
+  });
+
+  it('falls back to the own tabs when the tool takes its tab away', async () => {
+    const element = await mount(alice, { extraTabs: [{ id: 'import', label: 'Import' }] });
+    await click(element, 'Import');
+
+    element.extraTabs = undefined;
+    await settled(element);
+    expect(() => button(element, 'Import')).toThrow();
+    expect(rootOf(element).querySelector('.body')).not.toBeNull();
+  });
+
+  it('shows on reload a room the tool created elsewhere', async () => {
+    const element = await mount(alice);
+    await alice.rooms.create({ name: 'Von außen' });
+    expect(textOf(element)).not.toContain('Von außen');
+
+    await element.reload();
+    await settled(element);
+    expect(textOf(element)).toContain('Von außen');
   });
 });

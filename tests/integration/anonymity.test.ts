@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import * as Y from 'yjs';
 
+import { may } from '../../src/auth/access.ts';
 import { seesThroughEverywhere } from '../../src/auth/anonymity.ts';
 import { createTokenCheck } from '../../src/auth/token.ts';
 import { applyDefinitions } from '../../src/db/apply.ts';
@@ -677,6 +678,17 @@ describe('what goes out', () => {
     expect(await seesThroughEverywhere(storage.db, { actorId: 'dora' })).toBe(false);
     expect(await seesThroughEverywhere(storage.db, { actorId: 'alice' })).toBe(true);
     expect(await seesThroughEverywhere(storage.db, { actorId: 'zed', top: true })).toBe(true);
+  });
+
+  it('shows the top a pseudonym without TOP_SEES_PSEUDONYMS, its rights and own grants untouched', async () => {
+    const blind = { actorId: 'zed', top: true, topBlind: true } as const;
+
+    expect(await seesThroughEverywhere(storage.db, blind)).toBe(false);
+    expect(await may(storage.db, blind, 'manage')).toBe(true);
+    // Alice holds manage everywhere by a grant of her own, which still counts.
+    expect(
+      await seesThroughEverywhere(storage.db, { actorId: 'alice', top: true, topBlind: true }),
+    ).toBe(true);
   });
 
   it('masks the traces, the changes and the persons given a task alike', async () => {
