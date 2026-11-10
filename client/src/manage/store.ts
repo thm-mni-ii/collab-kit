@@ -60,6 +60,8 @@ export interface Entry {
 /** Everything the element shows. */
 export interface State {
   readonly tab: Tab;
+  /** The id of the tab of the tool shown instead of tab; undefined while an own one is. */
+  readonly extra: string | undefined;
   readonly rooms: readonly Named<Room>[];
   readonly groups: readonly Named<Group>[];
   readonly workpieces: ReadonlyMap<string, Workpiece>;
@@ -82,6 +84,7 @@ export interface State {
 /** Before ck is set. */
 const EMPTY: State = {
   tab: 'rooms',
+  extra: undefined,
   rooms: [],
   groups: [],
   workpieces: new Map(),
@@ -163,8 +166,13 @@ export class Store {
   }
 
   async show(tab: Tab): Promise<void> {
-    this.set({ tab, form: undefined, failure: undefined, saved: undefined });
+    this.set({ tab, extra: undefined, form: undefined, failure: undefined, saved: undefined });
     await this.select(this.keptOrFirst(tab));
+  }
+
+  /** Shows the slot of a tab of the tool; the own tab stays as it was, for going back. */
+  showExtra(id: string | undefined): void {
+    this.set({ extra: id, form: undefined, failure: undefined, saved: undefined });
   }
 
   /** Shows this room, group or workpiece of the tab, with what holds there. */

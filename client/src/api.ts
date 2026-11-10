@@ -693,6 +693,20 @@ export interface ManagementOptions {
   newWorkpiece: ((room: Room, name: string) => NewWorkpiece | Promise<NewWorkpiece>) | undefined;
   /** People the tool knows for what was typed in; left out, a member is added by its key. */
   findPeople: ((text: string) => Promise<readonly ActorName[]>) | undefined;
+  /** Tabs of the tool after the own ones, each showing the slot of its id; left out, none. */
+  extraTabs: readonly ManagementTab[] | undefined;
+}
+
+/** A tab of the tool: its button reads label, and it shows <slot name=id> over the full width. */
+export interface ManagementTab {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** <ck-management> as a tool holds it: the options, and loading anew what CK holds. */
+export interface ManagementElement extends ManagementOptions {
+  /** Asks for rooms, groups and workpieces anew, e.g. after the tool created some elsewhere. */
+  reload(): Promise<void>;
 }
 
 /** The detail of ck-open: the workpiece to open, and the room it was opened from. */
