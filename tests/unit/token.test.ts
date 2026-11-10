@@ -206,6 +206,27 @@ describe('createTokenCheck with a top claim set for the instance', () => {
     );
   });
 
+  it('marks the top as blind to pseudonyms when the instance says so', async () => {
+    const blind = createTokenCheck({
+      key: secret,
+      algorithm: 'HS256',
+      top: { claim: 'globalRole', values: ['ADMIN'], seesPseudonyms: false },
+    });
+
+    await expect(
+      blind(sign({ sub: 'u-8134', globalRole: 'ADMIN' }, { expiresIn: '15m' })),
+    ).resolves.toEqual({
+      actorId: 'u-8134',
+      top: true,
+      topBlind: true,
+      expiresAt: expect.any(Number),
+    });
+    await expect(blind(sign({ sub: 'u-8134' }, { expiresIn: '15m' }))).resolves.toEqual({
+      actorId: 'u-8134',
+      expiresAt: expect.any(Number),
+    });
+  });
+
   it('puts nobody at the top while no claim is set', async () => {
     const token = sign({ sub: 'u-8134', globalRole: 'ADMIN' }, { expiresIn: '15m' });
 

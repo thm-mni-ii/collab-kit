@@ -4,6 +4,8 @@ export interface Actor {
   readonly label?: string;
   /** Named by the top claim of the instance, so every right holds everywhere; never stored. */
   readonly top?: true;
+  /** At the top, but TOP_SEES_PSEUDONYMS is false: the top alone shows no keys behind pseudonyms. */
+  readonly topBlind?: true;
   /** Seconds since 1970 until the token is taken, tolerance included; left out, it never runs out. */
   readonly expiresAt?: number;
 }
