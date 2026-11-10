@@ -324,6 +324,11 @@ export const frame = css`
     gap: 12px;
     min-height: 0;
   }
+  .extra {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
   .list,
   .detail {
     min-height: 0;

@@ -68,7 +68,9 @@ export async function eventStamps(db: Db, event: NewEvent): Promise<Stamp[]> {
 
 /** Whether the actor sees the true keys behind pseudonyms: only with manage everywhere, not at a place. */
 export function seesThroughEverywhere(db: Db, actor: Actor): Promise<boolean> {
-  return may(db, actor, 'manage');
+  // Without TOP_SEES_PSEUDONYMS the top counts for nothing here, an own grant still does.
+  const { top: _top, ...withoutTop } = actor;
+  return may(db, actor.topBlind === true ? withoutTop : actor, 'manage');
 }
 
 /** Who reads an answer: sees their own key, and true keys behind pseudonyms with manage everywhere. */

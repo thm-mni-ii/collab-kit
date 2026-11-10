@@ -2,7 +2,14 @@
 
 import { LitElement, html, nothing, type TemplateResult } from 'lit';
 
-import type { CollabKitApi, ManagementOpen, ManagementOptions, Room, Workpiece } from '../api.ts';
+import type {
+  CollabKitApi,
+  ManagementElement,
+  ManagementOpen,
+  ManagementOptions,
+  Room,
+  Workpiece,
+} from '../api.ts';
 import { info, plus } from './look/icons.ts';
 import { textsFor, type Texts } from './look/texts.ts';
 import { base, frame, tokens } from './look/theme.ts';
@@ -11,11 +18,12 @@ import { roomCount } from './parts/workpiece.ts';
 import { Store, type FormKind, type Tab } from './store.ts';
 
 /** What a tool sets, as properties and the lang attribute; the rest lives in the store. */
-export class Management extends LitElement implements ManagementOptions {
+export class Management extends LitElement implements ManagementElement {
   static override properties = {
     ck: { attribute: false },
     newWorkpiece: { attribute: false },
     findPeople: { attribute: false },
+    extraTabs: { attribute: false },
     language: { attribute: 'lang' },
     infoOpen: { state: true },
   };
@@ -25,6 +33,7 @@ export class Management extends LitElement implements ManagementOptions {
   declare ck: CollabKitApi | undefined;
   declare newWorkpiece: ManagementOptions['newWorkpiece'];
   declare findPeople: ManagementOptions['findPeople'];
+  declare extraTabs: ManagementOptions['extraTabs'];
   /** The lang attribute; left out, the one of the page counts. */
   declare language: string | undefined;
   /** Whether the longer explanation under the title is shown. */
@@ -88,6 +97,11 @@ export class Management extends LitElement implements ManagementOptions {
     });
   }
 
+  /** Asks for rooms, groups and workpieces anew; the selection stays where it still exists. */
+  reload(): Promise<void> {
+    return this.store.load();
+  }
+
   /** The words in the language of the element, else of the page. */
   private get t(): Texts {
     return textsFor(this.language ?? document.documentElement.lang);
@@ -109,6 +123,11 @@ export class Management extends LitElement implements ManagementOptions {
     if (changed.has('ck')) {
       void this.store.load();
     }
+    // A tab the tool took away is no longer shown.
+    const { extra } = this.store.state;
+    if (extra !== undefined && !(this.extraTabs ?? []).some((each) => each.id === extra)) {
+      this.store.showExtra(undefined);
+    }
   }
 
   protected override updated(): void {
@@ -121,7 +140,7 @@ export class Management extends LitElement implements ManagementOptions {
       return nothing;
     }
     const { t } = this;
-    const { tab, failure, saved, mayCreate } = this.store.state;
+    const { tab, extra, failure, saved, mayCreate } = this.store.state;
 
     return html`<div class="frame">
       <div class="title">
@@ -140,21 +159,29 @@ export class Management extends LitElement implements ManagementOptions {
       <div class="bar" role="tablist">
         ${this.tabButton('rooms', t.rooms)} ${this.tabButton('groups', t.groups)}
         ${mayCreate ? this.tabButton('workpieces', t.workpieces) : nothing}
+        ${(this.extraTabs ?? []).map((each) => this.extraButton(each.id, each.label))}
       </div>
       ${failure === undefined ? nothing : html`<p class="error banner" role="alert">${failure}</p>`}
       ${saved === undefined ? nothing : html`<p class="hint banner" role="status">${saved}</p>`}
-      <div class="body">
-        <div class="list">${tab === 'workpieces' ? this.workpieceList(t) : this.listView(t)}</div>
-        <div class="detail">
-          ${
-            tab === 'rooms'
-              ? this.roomDetail(t)
-              : tab === 'groups'
-                ? this.groupDetail(t)
-                : this.workpieceDetail(t)
-          }
-        </div>
-      </div>
+      ${
+        extra === undefined
+          ? html`<div class="body">
+              <div class="list">
+                ${tab === 'workpieces' ? this.workpieceList(t) : this.listView(t)}
+              </div>
+              <div class="detail">
+                ${
+                  tab === 'rooms'
+                    ? this.roomDetail(t)
+                    : tab === 'groups'
+                      ? this.groupDetail(t)
+                      : this.workpieceDetail(t)
+                }
+              </div>
+            </div>`
+          : // What the tab shows the tool puts into its light DOM.
+            html`<div class="extra"><slot name=${extra}></slot></div>`
+      }
     </div>`;
   }
 
@@ -179,8 +206,20 @@ export class Management extends LitElement implements ManagementOptions {
     return html`<button
       class="tab"
       role="tab"
-      aria-selected=${this.store.state.tab === tab}
+      aria-selected=${this.store.state.extra === undefined && this.store.state.tab === tab}
       @click=${() => void this.store.show(tab)}
+    >
+      ${label}
+    </button>`;
+  }
+
+  /** The button of a tab of the tool, with the label the tool gave it. */
+  private extraButton(id: string, label: string): TemplateResult {
+    return html`<button
+      class="tab"
+      role="tab"
+      aria-selected=${this.store.state.extra === id}
+      @click=${() => this.store.showExtra(id)}
     >
       ${label}
     </button>`;

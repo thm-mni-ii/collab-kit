@@ -42,6 +42,9 @@ const { createCollabKitApi } = await import('https://ck.example/client/v1.js');
 const ck = createCollabKitApi({ url: 'https://ck.example', getToken });
 ```
 
+Earlier states come the same way: `ck.workpieces.unitsAt(id, { at })` gives their units without
+Yjs, and `GET /workpieces/:id/units?at=` gives them as JSON to tools in other languages.
+
 `/client/v1.js`, `/client/v1.d.ts` with the types and `/client/manage-v1.js` come without a token,
 for every page that `ALLOWED_ORIGINS` allows.
 

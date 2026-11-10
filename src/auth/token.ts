@@ -35,6 +35,8 @@ export function usesSharedSecret(algorithm: string): boolean {
 export interface TopClaim {
   readonly claim: string;
   readonly values: readonly string[];
+  /** False when standing at the top shows no keys behind pseudonyms; left out, it does. */
+  readonly seesPseudonyms?: false;
 }
 
 /** Finds the key a token names by the kid in its header. */
@@ -142,8 +144,9 @@ export function createTokenCheck(options: TokenOptions): TokenCheck {
     const expiresAt = typeof exp === 'number' ? exp + clockTolerance : undefined;
     // A service never stands at the top, its rights come from grants alone.
     const top = forServices ? undefined : topOf(claims, options.top);
+    const topBlind = top === true && options.top?.seesPseudonyms === false ? true : undefined;
 
-    return { actorId, ...defined({ label, top, expiresAt }) };
+    return { actorId, ...defined({ label, top, topBlind, expiresAt }) };
   };
 }
 
