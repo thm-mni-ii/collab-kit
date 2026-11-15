@@ -123,6 +123,15 @@ export function createRoutes(baseUrl: string, getToken: () => string | Promise<s
     actors: {
       names: (actorIds) => read('/actors', { ids: actorIds.join(',') }),
     },
+    settings: {
+      list: () => read('/settings'),
+      get: (key) => read(`/settings/${segment(key)}`),
+      set: (key, values) => write('PUT', `/settings/${segment(key)}`, values),
+      // 204 brings no body, so there is nothing to read as JSON.
+      remove: async (key) => {
+        await fetchRoute(baseUrl, await getToken(), 'DELETE', `/settings/${segment(key)}`);
+      },
+    },
     me: {
       who: () => read('/me'),
       rights: (target) => read('/me/rights', { kind: target?.kind, id: target?.id }),

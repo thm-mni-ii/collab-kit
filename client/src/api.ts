@@ -29,6 +29,7 @@ export interface CollabKitApi {
   readonly events: EventRoutes;
   readonly actors: ActorRoutes;
   readonly me: MeRoutes;
+  readonly settings: SettingsRoutes;
 }
 
 /** A refusal of CK, or of the library in its place: a status and what CK said. */
@@ -90,6 +91,8 @@ export interface SessionEvents<Value = unknown> {
   readonly rightsChanged: boolean;
   /** Writes anonymously now or not, when CK answers otherwise; clientId and awareness are new. */
   readonly anonymityChanged: boolean;
+  /** An area of settings changed or went; the name only, the values are read anew. */
+  readonly settingsChanged: string;
   /** CK ended the session; it stays closed until connect is called. */
   readonly closed: Closed;
   /** A change lost at this workpiece, to whoever was involved and whoever was not. */
@@ -652,6 +655,18 @@ export interface EventRoutes {
 export interface ActorRoutes {
   /** The stored names of these people, as far as the token may put a name to them. */
   names(actorIds: readonly string[]): Promise<ActorName[]>;
+}
+
+/** Settings of the tool by area, valid for the whole instance; CK never reads the values. */
+export interface SettingsRoutes {
+  /** The names of every stored area. */
+  list(): Promise<string[]>;
+  /** The values of an area; one never set reads as {}. */
+  get(key: string): Promise<Record<string, unknown>>;
+  /** Replaces the values of an area as a whole; needs manage without a place. */
+  set(key: string, values: Record<string, unknown>): Promise<Record<string, unknown>>;
+  /** Removes an area, so the tool falls back on its defaults; needs manage without a place. */
+  remove(key: string): Promise<void>;
 }
 
 /** Tasks given to the own person or one of its groups. */

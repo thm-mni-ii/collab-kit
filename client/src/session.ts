@@ -91,6 +91,7 @@ export function openSession<Value>(
     status: new Set(),
     rightsChanged: new Set(),
     anonymityChanged: new Set(),
+    settingsChanged: new Set(),
     closed: new Set(),
     conflict: new Set(),
   };
@@ -326,9 +327,15 @@ export function openSession<Value>(
 
     next.messageHandlers[MESSAGE_EVENT] = (_encoder, decoder) => {
       // Nothing goes into the encoder, or y-websocket would send it back.
-      const event = JSON.parse(decoding.readVarString(decoder)) as Named<CollabEvent>;
+      // settings-changed is no stored event and carries the name of its area as key.
+      const event = JSON.parse(decoding.readVarString(decoder)) as Named<CollabEvent> & {
+        readonly key?: string;
+      };
       if (event.kind === 'work-lost') {
         emit('conflict', conflictOf(event, me?.actorId, lostIn(event)));
+      } else if (event.kind === 'settings-changed' && event.key !== undefined) {
+        // Only the name comes along, the tool reads the values itself.
+        emit('settingsChanged', event.key);
       }
     };
     next.awareness.on('change', tellPresence);
