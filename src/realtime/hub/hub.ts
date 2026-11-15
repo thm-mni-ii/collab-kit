@@ -17,7 +17,12 @@ import {
   type Stored,
 } from './persistence.ts';
 import type { Connection, HubOptions, Merge, OpenWorkpiece, WorkpieceHub } from './types.ts';
-import { encodeAwareness, encodeSyncUpdate, SENDER_DELETES } from '../connection/protocol.ts';
+import {
+  encodeAwareness,
+  encodeEvent,
+  encodeSyncUpdate,
+  SENDER_DELETES,
+} from '../connection/protocol.ts';
 import { createBundling } from '../conflicts/bundling.ts';
 import {
   deletionsIn,
@@ -527,6 +532,18 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
             stampField(stampsOf([author])),
           ),
         );
+    },
+
+    broadcast: (event) => {
+      // Encoded once, the same bytes go to everyone who asked.
+      const message = encodeEvent(event);
+      for (const held of heldByKey.values()) {
+        for (const connection of held.connections) {
+          if (connection.wantsEvents) {
+            connection.send(message);
+          }
+        }
+      }
     },
 
     close: async () => {

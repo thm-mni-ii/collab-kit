@@ -80,6 +80,8 @@ export interface WorkpieceHub {
   count(workpieceId: ObjectId): number;
   /** Who is connected to this workpiece right now, one entry per person, by actorId. */
   presentAt(workpieceId: ObjectId): PresentActor[];
+  /** Sends an event to every connection that asked for events, at every workpiece. */
+  broadcast(event: object): void;
   /** Lets go of every workpiece, for the shutdown. */
   close(): Promise<void>;
 }

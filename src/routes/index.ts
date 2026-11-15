@@ -14,6 +14,7 @@ import { workpieceRoutes } from './workpieces.ts';
 import { eventRoutes } from './events.ts';
 import { commentRoutes } from './comments.ts';
 import { taskRoutes } from './tasks.ts';
+import { settingsRoutes } from './settings.ts';
 import { actorOf } from './http.ts';
 
 export interface ApiOptions {
@@ -55,6 +56,7 @@ export function createApi(options: ApiOptions): Router {
   const decisions = options.decisionStates ?? [];
   api.use(commentRoutes(options.db, decisions));
   api.use(taskRoutes(options.db, decisions));
+  api.use(settingsRoutes(options.db, options.hub));
 
   return api;
 }
