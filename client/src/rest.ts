@@ -36,7 +36,6 @@ export function createRoutes(baseUrl: string, getToken: () => string | Promise<s
       create: (room) => write('POST', '/rooms', room),
       get: (id) => read(`/rooms/${segment(id)}`),
       update: (id, change) => write('PATCH', `/rooms/${segment(id)}`, change),
-      remove: (id, options = {}) => remove(`/rooms/${segment(id)}`, { ...options }),
       archive: (id, options = {}) => write('POST', `/rooms/${segment(id)}/archive`, options),
       addWorkpiece: (id, workpieceId) =>
         write('POST', `/rooms/${segment(id)}/workpieces`, { workpieceId }),
@@ -51,7 +50,6 @@ export function createRoutes(baseUrl: string, getToken: () => string | Promise<s
       list: () => read('/groups'),
       get: (id) => read(`/groups/${segment(id)}`),
       update: (id, change) => write('PATCH', `/groups/${segment(id)}`, change),
-      remove: (id, options = {}) => remove(`/groups/${segment(id)}`, { ...options }),
       archive: (id, options = {}) => write('POST', `/groups/${segment(id)}/archive`, options),
       addMember: (id, actorId) => write('POST', `/groups/${segment(id)}/members`, { actorId }),
       removeMember: (id, actorId) => remove(`/groups/${segment(id)}/members/${segment(actorId)}`),

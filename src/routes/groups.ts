@@ -7,7 +7,6 @@ import { archiveOf } from '../db/client.ts';
 import {
   addMember,
   createGroup,
-  deleteGroup,
   findGroup,
   groupsOf,
   removeMember,
@@ -132,26 +131,6 @@ export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
       await setGroupSettings(db, id, settings);
     }
     response.json(await withNames(db, await findGroup(db, id), readerOf(db, actorOf(request))));
-  });
-
-  // The reason in the query, as a body on DELETE may get lost on the way.
-  routes.delete('/groups/:id', seeing, changing, async (request, response) => {
-    const reason = asText(request.query['reason']);
-
-    const unusable = unusableField(request.query, { reason });
-    if (unusable !== undefined) {
-      return fail(response, 400, `${unusable} is unusable`);
-    }
-
-    const deleted = await deleteGroup(db, idOf(request), {
-      deletedBy: actorOf(request).actorId,
-      ...defined({ reason }),
-    });
-    // Its members lose what the group opened, so their connections are asked again.
-    if (deleted) {
-      await recheckAccess();
-    }
-    response.json({ deleted });
   });
 
   /** Moves the group with its members into the archive; its grants stay and open nothing meanwhile. */

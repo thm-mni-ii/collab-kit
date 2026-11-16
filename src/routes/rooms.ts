@@ -10,7 +10,6 @@ import { latestPerActor, readEventsSince, withoutAnchor } from '../db/collection
 import {
   addToRoom,
   createRoom,
-  deleteRoom,
   findRoom,
   removeFromRoom,
   renameRoom,
@@ -101,26 +100,6 @@ export function roomRoutes(db: Db, hub: WorkpieceHub, recheckAccess: () => Promi
       await setRoomSettings(db, id, settings);
     }
     response.json(await withNames(db, await findRoom(db, id), readerOf(db, actorOf(request))));
-  });
-
-  // The reason in the query, as a body on DELETE may get lost on the way.
-  routes.delete('/rooms/:id', seeing, changing, async (request, response) => {
-    const reason = asText(request.query['reason']);
-
-    const unusable = unusableField(request.query, { reason });
-    if (unusable !== undefined) {
-      return fail(response, 400, `${unusable} is unusable`);
-    }
-
-    const deleted = await deleteRoom(db, idOf(request), {
-      deletedBy: actorOf(request).actorId,
-      ...defined({ reason }),
-    });
-    // Without the room and its grants, open connections to what it opened would carry on.
-    if (deleted) {
-      await recheckAccess();
-    }
-    response.json({ deleted });
   });
 
   /** Moves the room with all that hangs on it into the archive; its workpieces stay live. */

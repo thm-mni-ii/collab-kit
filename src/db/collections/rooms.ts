@@ -2,8 +2,7 @@ import { ObjectId, type Db, type Document } from 'mongodb';
 
 import { defined } from '../../utils/optional.ts';
 import type { CollectionDefinition } from '../apply.ts';
-import { writeReturningEvents, writeWithEvents, type NewEvent } from './events.ts';
-import { removeGrantsAt } from './grants.ts';
+import { writeWithEvents, type NewEvent } from './events.ts';
 
 /** Bundles without owning: its workpieces live on their own and may sit in several rooms. */
 export interface RoomRecord {
@@ -167,40 +166,6 @@ export async function renameRoom(
       return result.modifiedCount === 1;
     },
     [roomEvent('room-renamed', roomId, input.renamedBy, { to: input.name }, input.reason)],
-    now,
-  );
-}
-
-export interface RoomDeletion {
-  readonly deletedBy: string;
-  readonly reason?: string;
-}
-
-/** Deletes the room and the grants at it; what it bundled stays, and so do its events. */
-export async function deleteRoom(
-  db: Db,
-  roomId: ObjectId,
-  input: RoomDeletion,
-  now = new Date(),
-): Promise<boolean> {
-  return writeReturningEvents(
-    db,
-    async (session) => {
-      const room = await db
-        .collection<RoomRecord>('rooms')
-        .findOneAndDelete({ _id: roomId }, { session });
-      if (room === null) {
-        return [];
-      }
-
-      // Rights at a place that is gone would hold at nothing, so they go with it.
-      const removal = { removedBy: input.deletedBy, ...defined({ reason: input.reason }) };
-      const removed = await removeGrantsAt(db, { kind: 'room', id: roomId }, removal, session);
-      return [
-        ...removed,
-        roomEvent('room-deleted', roomId, input.deletedBy, { name: room.name }, input.reason),
-      ];
-    },
     now,
   );
 }

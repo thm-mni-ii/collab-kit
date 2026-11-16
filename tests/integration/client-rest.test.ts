@@ -38,7 +38,6 @@ const ROUTES = [
   'POST /rooms',
   'GET /rooms/:id',
   'PATCH /rooms/:id',
-  'DELETE /rooms/:id',
   'POST /rooms/:id/workpieces',
   'DELETE /rooms/:id/workpieces/:workpieceId',
   'GET /rooms/:id/events',
@@ -48,7 +47,6 @@ const ROUTES = [
   'GET /groups',
   'GET /groups/:id',
   'PATCH /groups/:id',
-  'DELETE /groups/:id',
   'POST /groups/:id/members',
   'DELETE /groups/:id/members/:actorId',
   'PUT /grants',
@@ -249,8 +247,11 @@ describe('the REST wrapper', () => {
       removed: true,
     });
     expect(await bob.me.rights(scope)).toEqual([]);
-    expect(await alice.groups.remove(group._id)).toEqual({ deleted: true });
-    expect(await alice.rooms.remove(room._id, { reason: 'vorbei' })).toEqual({ deleted: true });
+    // Taken down into the archive, the only way out.
+    expect(await alice.groups.archive(group._id)).toMatchObject({ _id: group._id });
+    expect(await alice.rooms.archive(room._id, { reason: 'vorbei' })).toMatchObject({
+      _id: room._id,
+    });
   });
 
   it('reads what sessions wrote, forks, merges, and tells whose work came in', async () => {
@@ -571,11 +572,13 @@ describe('the REST wrapper', () => {
     expect(await alice.rooms.archive(room._id)).toMatchObject({ _id: room._id, kind: 'room' });
     expect(await alice.groups.archive(group._id)).toMatchObject({ _id: group._id, kind: 'group' });
 
-    // Of all kinds or of one; sorted here, as all three may have gone in the same millisecond.
-    expect(idsOf(await alice.archive.list()).toSorted()).toEqual(
-      [group._id, room._id, workpiece._id].toSorted(),
+    // Of all kinds or of one; an earlier test archived a room and a group too.
+    expect(idsOf(await alice.archive.list())).toEqual(
+      expect.arrayContaining([group._id, room._id, workpiece._id]),
     );
-    expect(idsOf(await alice.archive.list({ kind: 'room' }))).toEqual([room._id]);
+    const rooms = idsOf(await alice.archive.list({ kind: 'room' }));
+    expect(rooms).toContain(room._id);
+    expect(rooms).not.toContain(workpiece._id);
     await expect(bob.archive.restore(room._id)).rejects.toMatchObject({ status: 404 });
 
     // The room first, then the workpiece, which goes back into it.
@@ -585,7 +588,8 @@ describe('the REST wrapper', () => {
 
     expect(await alice.archive.remove(group._id, { reason: 'vorbei' })).toEqual({ deleted: true });
     await expect(alice.groups.get(group._id)).rejects.toMatchObject({ status: 404 });
-    expect(await alice.archive.list()).toEqual([]);
+    const mine = new Set([group._id, room._id, workpiece._id]);
+    expect(idsOf(await alice.archive.list()).filter((id) => mine.has(id))).toEqual([]);
   });
 
   it('throws a CollabKitError with the status and the words of CK', async () => {

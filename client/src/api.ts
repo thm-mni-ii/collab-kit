@@ -459,7 +459,6 @@ export interface RoomRoutes {
   create(room: NewRoom): Promise<Named<Room>>;
   get(id: string): Promise<Named<Room>>;
   update(id: string, change: PlaceChange): Promise<Named<Room>>;
-  remove(id: string, options?: Reasoned): Promise<{ readonly deleted: boolean }>;
   /** Into the archive with all that hangs on it; its workpieces stay. Takes manage at it. */
   archive(id: string, options?: Reasoned): Promise<ArchiveEntry>;
   addWorkpiece(id: string, workpieceId: string): Promise<Named<Room>>;
@@ -483,7 +482,6 @@ export interface GroupRoutes {
   list(): Promise<Named<Group>[]>;
   get(id: string): Promise<Named<Group>>;
   update(id: string, change: PlaceChange): Promise<Named<Group>>;
-  remove(id: string, options?: Reasoned): Promise<{ readonly deleted: boolean }>;
   /** Into the archive with its members; its grants open nothing meanwhile. Takes manage at it. */
   archive(id: string, options?: Reasoned): Promise<ArchiveEntry>;
   addMember(id: string, actorId: string): Promise<Named<Group>>;
