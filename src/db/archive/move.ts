@@ -8,6 +8,7 @@ import {
   writeReturningEvents,
   type NewEvent,
 } from '../collections/events.ts';
+import { removeGrantsWhere, type GrantRecord } from '../collections/grants.ts';
 import type { RoomRecord } from '../collections/rooms.ts';
 import type { SnapshotRecord } from '../collections/snapshots.ts';
 import type { WorkpieceRecord } from '../collections/workpieces.ts';
@@ -50,6 +51,12 @@ export interface WorkpieceArchiving extends Archiving {
 /** Who brings an entry back. */
 export interface Restoring {
   readonly restoredBy: string;
+}
+
+/** Who deletes an entry for good, and why. */
+export interface Deleting {
+  readonly deletedBy: string;
+  readonly reason?: string;
 }
 
 /** What only a workpiece writes into its entry. */
@@ -180,6 +187,65 @@ export async function restoreEntry(
   return entry;
 }
 
+/** Deletes an entry with all it holds, and live every grant at it; false if there is none. */
+export async function deleteEntry(
+  db: Db,
+  archive: Db,
+  entryId: ObjectId,
+  input: Deleting,
+  now = new Date(),
+): Promise<boolean> {
+  return writeReturningEvents(
+    db,
+    async (session) => {
+      const entry = await archive
+        .collection<EntryRecord>('entries')
+        .findOneAndDelete({ _id: entryId }, { session });
+      if (entry === null) {
+        return [];
+      }
+
+      // Exactly what archiving moved, so nothing of it is left behind.
+      const ids = [entry._id, ...(entry.forks ?? [])];
+      const { all, parts } = await withChain(archive, COLLECTION_OF[entry.kind], ids, session);
+      if (entry.kind === 'workpiece') {
+        parts.push(['updates', { workpieceId: { $in: ids } }]);
+        parts.push(['snapshots', { workpieceId: { $in: ids } }]);
+      }
+      /* eslint-disable no-await-in-loop */
+      for (const [name, filter] of parts) {
+        await archive.collection(name).deleteMany(filter, { session });
+      }
+      /* eslint-enable no-await-in-loop */
+
+      // Rights at what is gone would hold at nothing, and a group's own go with the group.
+      const removal = { removedBy: input.deletedBy, ...defined({ reason: input.reason }) };
+      const holding = [
+        { 'scope.id': { $in: all } },
+        ...(entry.kind === 'group' ? [{ groupId: entry._id }] : []),
+      ];
+      const removed = await removeGrantsWhere(
+        db,
+        { $or: holding } as Filter<GrantRecord>,
+        removal,
+        session,
+      );
+
+      return [
+        ...removed,
+        {
+          kind: `${entry.kind}-deleted`,
+          createdBy: input.deletedBy,
+          anchor: { kind: entry.kind, id: entry._id },
+          detail: { name: entry.name, ...defined({ forks: entry.forks }) },
+          ...defined({ reason: input.reason }),
+        },
+      ];
+    },
+    now,
+  );
+}
+
 /** Moves one thing of a kind, writes its entry and its event; extra moves what only its kind has. */
 async function archiveOne(
   db: Db,
@@ -240,24 +306,42 @@ async function moveWithChain(
   ids: readonly ObjectId[],
   session: ClientSession,
 ): Promise<void> {
-  const chain = await chainUnder(from, ids, session);
-  const all = [...ids, ...chain.comments, ...chain.tasks];
+  const { parts } = await withChain(from, collection, ids, session);
 
   // One after another: a transaction runs one operation at a time.
-  await move(from, to, collection, { _id: { $in: [...ids] } }, session);
-  await move(from, to, 'comments', { _id: { $in: chain.comments } }, session);
-  await move(from, to, 'tasks', { _id: { $in: chain.tasks } }, session);
-  await move(from, to, 'pseudonyms', { 'about.id': { $in: [...ids] } }, session);
-  await move(
-    from,
-    to,
-    'events',
-    {
-      $or: [{ 'anchor.id': { $in: all } }, { 'about.id': { $in: [...ids] } }],
-      kind: { $nin: STAYING },
-    },
-    session,
-  );
+  /* eslint-disable no-await-in-loop */
+  for (const [name, filter] of parts) {
+    await move(from, to, name, filter, session);
+  }
+  /* eslint-enable no-await-in-loop */
+}
+
+/** What moveWithChain moves, collection by collection, and every id at which it hangs. */
+async function withChain(
+  db: Db,
+  collection: string,
+  ids: readonly ObjectId[],
+  session: ClientSession,
+): Promise<{ all: ObjectId[]; parts: [string, Filter<Document>][] }> {
+  const chain = await chainUnder(db, ids, session);
+  const all = [...ids, ...chain.comments, ...chain.tasks];
+
+  return {
+    all,
+    parts: [
+      [collection, { _id: { $in: [...ids] } }],
+      ['comments', { _id: { $in: chain.comments } }],
+      ['tasks', { _id: { $in: chain.tasks } }],
+      ['pseudonyms', { 'about.id': { $in: [...ids] } }],
+      [
+        'events',
+        {
+          $or: [{ 'anchor.id': { $in: all } }, { 'about.id': { $in: [...ids] } }],
+          kind: { $nin: STAYING },
+        },
+      ],
+    ],
+  };
 }
 
 /** Comments and tasks hanging on these things, downwards until none is added: aboutOf upside down. */

@@ -112,6 +112,11 @@ export const SERVICE_KINDS: ReadonlySet<string> = new Set([
   'workpiece-merged',
   'workpiece-archived',
   'workpiece-restored',
+  'workpiece-deleted',
+  'room-archived',
+  'room-restored',
+  'group-archived',
+  'group-restored',
 ]);
 
 /** What a merge found, written under authors who were not there: no sign of their activity. */

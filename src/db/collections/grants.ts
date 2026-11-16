@@ -144,7 +144,7 @@ export async function removeGrantsOfGroup(
 }
 
 /** Takes away every grant the filter finds and answers with a trace for each. */
-async function removeGrantsWhere(
+export async function removeGrantsWhere(
   db: Db,
   filter: Filter<GrantRecord>,
   removal: Pick<GrantRemoval, 'removedBy' | 'reason'>,

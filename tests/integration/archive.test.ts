@@ -143,7 +143,7 @@ async function fillWorkpiece(workpieceId: ObjectId, readersId: ObjectId) {
     createdBy: 'bob',
     body: { text: 'Frage' },
   });
-  await createComment(storage.db, {
+  const reply = await createComment(storage.db, {
     kind: 'note',
     anchor,
     parentId: thread._id,
@@ -157,7 +157,7 @@ async function fillWorkpiece(workpieceId: ObjectId, readersId: ObjectId) {
     createdBy: 'alice',
     anchor: { kind: 'comment', id: thread._id },
   });
-  await createTask(storage.db, {
+  const subtask = await createTask(storage.db, {
     kind: 'todo',
     title: 'Teil',
     state: 'open',
@@ -171,7 +171,24 @@ async function fillWorkpiece(workpieceId: ObjectId, readersId: ObjectId) {
     setBy: 'alice',
   });
   await pseudonymOf(storage.db, { kind: 'workpiece', id: workpieceId }, 'bob');
-  return { lastChange: changes.at(-1)?._id };
+  return {
+    lastChange: changes.at(-1)?._id,
+    chain: [thread._id, reply._id, task._id, subtask._id],
+  };
+}
+
+/** How many documents of the database are, or hang at, one of these ids. */
+async function tracesOf(db: Db, ids: readonly ObjectId[]): Promise<number> {
+  const at = { $in: [...ids] };
+  const filter = {
+    $or: [{ _id: at }, { workpieceId: at }, { 'anchor.id': at }, { 'about.id': at }],
+  };
+  const counts = await Promise.all(
+    (await db.listCollections({}, { nameOnly: true }).toArray()).map((collection) =>
+      db.collection(collection.name).countDocuments(filter),
+    ),
+  );
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 /** Every document of the collections that come back unchanged, events without the archive's own. */
@@ -221,6 +238,21 @@ const listAs = async (actor: string, kind?: string) =>
       .query(kind === undefined ? {} : { kind })
       .set(as(actor))
   ).body as EntryRecord[];
+
+/** Deletes an entry for good as this person. */
+const deleteAs = (actor: string, entryId: ObjectId, reason?: string) =>
+  request(server)
+    .delete(`/archive/${entryId.toHexString()}`)
+    .query(reason === undefined ? {} : { reason })
+    .set(as(actor));
+
+/** How many grants live hold at this place or are held by this group. */
+const grantsTouching = (id: ObjectId) =>
+  storage.db.collection('grants').countDocuments({ $or: [{ 'scope.id': id }, { groupId: id }] });
+
+/** How many live events of this kind anchor at the thing. */
+const eventsAt = (kind: string, id: ObjectId) =>
+  storage.db.collection('events').countDocuments({ kind, 'anchor.id': id });
 
 /** Archives a room or a group as this person. */
 const archiveKindAs = (actor: string, kind: 'rooms' | 'groups', id: ObjectId) =>
@@ -654,5 +686,92 @@ describe('archiving a group', () => {
       // eslint-disable-next-line no-await-in-loop
       expect(await statusAs('erin', `/workpieces/${id.toHexString()}`)).toBe(200);
     }
+  });
+});
+
+describe('deleting from the archive', () => {
+  it('deletes a workpiece with its forks for good, and live every grant at them', async () => {
+    const { roomId, readersId, id } = await roomWithWorkpiece();
+    const { chain } = await fillWorkpiece(id, readersId);
+    const forked = await request(server)
+      .post(`/workpieces/${id.toHexString()}/forks`)
+      .set(as('alice'))
+      .send({ name: 'Kopie' });
+    expect(forked.status).toBe(201);
+    const fork = new ObjectId(forked.body._id as string);
+    const guests = await createGroup(storage.db, {
+      name: 'Gaeste',
+      createdBy: 'alice',
+      members: ['dave'],
+    });
+    await setGrant(storage.db, {
+      groupId: guests._id,
+      scope: { kind: 'workpiece', id: fork },
+      rights: ['see'],
+      setBy: 'alice',
+    });
+    expect((await archiveAs('alice', id)).status).toBe(200);
+
+    // carol sees nothing, alice manages at the room but not everywhere.
+    expect((await deleteAs('carol', id)).status).toBe(404);
+    expect((await deleteAs('alice', id)).status).toBe(403);
+    const deleted = await deleteAs('admin', id, 'Frist abgelaufen');
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toEqual({ deleted: true });
+
+    // Nothing of it is left in the archive, and live no grant at any of it, each with its trace.
+    const gone = [id, fork, ...chain];
+    expect(await tracesOf(storage.archive, gone)).toBe(0);
+    expect(
+      await storage.db.collection('grants').countDocuments({ 'scope.id': { $in: gone } }),
+    ).toBe(0);
+    expect(
+      await storage.db
+        .collection('events')
+        .countDocuments({ kind: 'grant-removed', 'anchor.id': { $in: gone } }),
+    ).toBe(2);
+    expect(
+      await storage.db.collection('events').findOne({ kind: 'workpiece-deleted', 'anchor.id': id }),
+    ).toMatchObject({
+      createdBy: 'admin',
+      reason: 'Frist abgelaufen',
+      detail: { name: 'Modell', forks: [fork] },
+    });
+    expect(await grantsTouching(roomId)).toBe(2);
+
+    // Gone for good: neither restored nor deleted a second time.
+    expect((await restoreAs('admin', id)).status).toBe(404);
+    expect((await deleteAs('admin', id)).status).toBe(404);
+  });
+
+  it('deletes a room for good with the grants at it, leaving its workpieces live', async () => {
+    const { roomId, id } = await roomWithWorkpiece();
+    expect((await archiveKindAs('alice', 'rooms', roomId)).status).toBe(200);
+    expect(await grantsTouching(roomId)).toBe(2);
+
+    expect((await deleteAs('alice', roomId)).status).toBe(403);
+    expect((await deleteAs('admin', roomId)).status).toBe(200);
+    expect(await tracesOf(storage.archive, [roomId])).toBe(0);
+    expect(await grantsTouching(roomId)).toBe(0);
+    expect(await eventsAt('grant-removed', roomId)).toBe(2);
+    expect(await eventsAt('room-deleted', roomId)).toBe(1);
+    expect(await storage.db.collection('workpieces').countDocuments({ _id: id })).toBe(1);
+  });
+
+  it('deletes a group for good with the grants it holds and those at it', async () => {
+    const { roomId, managersId } = await roomWithWorkpiece();
+    const team = await teamIn(roomId, managersId);
+    expect((await archiveKindAs('alice', 'groups', team)).status).toBe(200);
+    expect(await grantsTouching(team)).toBe(2);
+
+    expect((await deleteAs('alice', team)).status).toBe(403);
+    expect((await deleteAs('admin', team)).status).toBe(200);
+    expect(await tracesOf(storage.archive, [team])).toBe(0);
+    expect(await grantsTouching(team)).toBe(0);
+    expect(await eventsAt('grant-removed', roomId)).toBe(1);
+    expect(await eventsAt('grant-removed', team)).toBe(1);
+    expect(await eventsAt('group-deleted', team)).toBe(1);
+    // The others keep their grants at the room.
+    expect(await grantsTouching(roomId)).toBe(2);
   });
 });

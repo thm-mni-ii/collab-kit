@@ -1,15 +1,17 @@
 import { Router } from 'express';
 import type { Db, ObjectId } from 'mongodb';
 
-import { rightsAtEntry } from '../auth/access.ts';
+import { may, rightsAtEntry } from '../auth/access.ts';
 import { ARCHIVE_KINDS, type ArchiveKind } from '../db/archive/definitions.ts';
-import { findEntry, listEntries, restoreEntry } from '../db/archive/move.ts';
+import { deleteEntry, findEntry, listEntries, restoreEntry } from '../db/archive/move.ts';
 import { archiveOf } from '../db/client.ts';
 import type { Actor } from '../model/actor.ts';
 import type { Right } from '../model/right.ts';
-import { actorOf, fail, guard, idOf, requireId } from './http.ts';
+import { asText } from '../utils/input.ts';
+import { defined } from '../utils/optional.ts';
+import { actorOf, fail, guard, idOf, requireId, unusableField } from './http.ts';
 
-/** What was archived, and bringing it back; archiving itself sits with each kind's routes. */
+/** What was archived, bringing it back and deleting it; archiving sits with each kind's routes. */
 export function archiveRoutes(db: Db, recheckAccess: () => Promise<void>): Router {
   const archive = archiveOf(db);
   const routes = Router();
@@ -33,6 +35,12 @@ export function archiveRoutes(db: Db, recheckAccess: () => Promise<void>): Route
     async (actor, id) => (await rightsAt(actor, id)).has('manage'),
     403,
     'not allowed to restore this entry',
+  );
+  // Gone for good cannot be undone, so it takes manage everywhere; behind seeing as well.
+  const deleting = guard(
+    async (actor) => may(db, actor, 'manage'),
+    403,
+    'not allowed to delete this entry',
   );
 
   routes.get('/archive', async (request, response) => {
@@ -64,6 +72,26 @@ export function archiveRoutes(db: Db, recheckAccess: () => Promise<void>): Route
       await recheckAccess();
     }
     response.json({ restored: true });
+  });
+
+  // The reason in the query, as a body on DELETE may get lost on the way.
+  routes.delete('/archive/:id', seeing, deleting, async (request, response) => {
+    const reason = asText(request.query['reason']);
+    const unusable = unusableField(request.query, { reason });
+    if (unusable !== undefined) {
+      return fail(response, 400, `${unusable} is unusable`);
+    }
+
+    const deleted = await deleteEntry(db, archive, idOf(request), {
+      deletedBy: actorOf(request).actorId,
+      ...defined({ reason }),
+    });
+    // Restored or deleted by someone else in the meantime.
+    if (!deleted) {
+      return fail(response, 404, 'unknown archive entry');
+    }
+    // No recheck: the grants that went opened nothing while their place was archived.
+    response.json({ deleted: true });
   });
 
   return routes;
