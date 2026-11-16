@@ -37,6 +37,7 @@ export function createRoutes(baseUrl: string, getToken: () => string | Promise<s
       get: (id) => read(`/rooms/${segment(id)}`),
       update: (id, change) => write('PATCH', `/rooms/${segment(id)}`, change),
       remove: (id, options = {}) => remove(`/rooms/${segment(id)}`, { ...options }),
+      archive: (id, options = {}) => write('POST', `/rooms/${segment(id)}/archive`, options),
       addWorkpiece: (id, workpieceId) =>
         write('POST', `/rooms/${segment(id)}/workpieces`, { workpieceId }),
       removeWorkpiece: (id, workpieceId) =>
@@ -51,6 +52,7 @@ export function createRoutes(baseUrl: string, getToken: () => string | Promise<s
       get: (id) => read(`/groups/${segment(id)}`),
       update: (id, change) => write('PATCH', `/groups/${segment(id)}`, change),
       remove: (id, options = {}) => remove(`/groups/${segment(id)}`, { ...options }),
+      archive: (id, options = {}) => write('POST', `/groups/${segment(id)}/archive`, options),
       addMember: (id, actorId) => write('POST', `/groups/${segment(id)}/members`, { actorId }),
       removeMember: (id, actorId) => remove(`/groups/${segment(id)}/members/${segment(actorId)}`),
     },
@@ -98,6 +100,12 @@ export function createRoutes(baseUrl: string, getToken: () => string | Promise<s
         write('POST', `/workpieces/${segment(id)}/checkpoints`, checkpoint),
       fork: (id, fork) => write('POST', `/workpieces/${segment(id)}/forks`, fork),
       merge: (id, merge) => write('POST', `/workpieces/${segment(id)}/merges`, merge),
+      archive: (id, options = {}) => write('POST', `/workpieces/${segment(id)}/archive`, options),
+    },
+    archive: {
+      list: (query = {}) => read('/archive', { ...query }),
+      restore: (id) => write('POST', `/archive/${segment(id)}/restore`, {}),
+      remove: (id, options = {}) => remove(`/archive/${segment(id)}`, { ...options }),
     },
     comments: {
       create: (comment) => write('POST', '/comments', comment),

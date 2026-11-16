@@ -9,6 +9,7 @@ import { CollabKitError, type CollabKitApi, type Session } from '../../client/sr
 import { createCollabKitApi, isPseudonym } from '../../client/src/index.ts';
 import { createTokenCheck } from '../../src/auth/token.ts';
 import { applyDefinitions } from '../../src/db/apply.ts';
+import { archiveDefinitions } from '../../src/db/archive/definitions.ts';
 import { connect, type Storage } from '../../src/db/client.ts';
 import { collectionDefinitions } from '../../src/db/schemas.ts';
 import { attachGateway, createWorkpieceHub, type Gateway } from '../../src/realtime/index.ts';
@@ -77,6 +78,12 @@ const ROUTES = [
   'POST /events',
   'GET /events',
   'GET /actors',
+  'POST /workpieces/:id/archive',
+  'POST /rooms/:id/archive',
+  'POST /groups/:id/archive',
+  'GET /archive',
+  'POST /archive/:id/restore',
+  'DELETE /archive/:id',
 ];
 
 let storage: Storage;
@@ -125,6 +132,7 @@ function open(ck: CollabKitApi, workpieceId: string): Session {
 beforeAll(async () => {
   storage = await connect({ uri, database });
   await applyDefinitions(storage.db, collectionDefinitions);
+  await applyDefinitions(storage.archive, archiveDefinitions);
 
   const hub = createWorkpieceHub({ db: storage.db, logger: silent });
   const checkToken = createTokenCheck({
@@ -173,6 +181,7 @@ afterAll(async () => {
   await gateway.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await storage.db.dropDatabase();
+  await storage.archive.dropDatabase();
   await storage.close();
 });
 
@@ -542,6 +551,41 @@ describe('the REST wrapper', () => {
     ).toEqual([visitByAlice._id]);
 
     expect(await carol.events.inRooms({ kind: 'visit', createdBy: 'dave' })).toEqual([]);
+  });
+
+  it('archives, lists, restores and deletes for good', async () => {
+    const room = await alice.rooms.create({ name: 'Archivraum' });
+    const group = await alice.groups.create({ name: 'Archivgruppe', members: ['bob'] });
+    const workpiece = await alice.workpieces.create({ name: 'Altlast', roomId: room._id });
+
+    expect(
+      await alice.workpieces.archive(workpiece._id, { reason: 'Semester vorbei' }),
+    ).toMatchObject({
+      _id: workpiece._id,
+      kind: 'workpiece',
+      name: 'Altlast',
+      reason: 'Semester vorbei',
+      rooms: [{ workpiece: workpiece._id, room: room._id }],
+      forks: [],
+    });
+    expect(await alice.rooms.archive(room._id)).toMatchObject({ _id: room._id, kind: 'room' });
+    expect(await alice.groups.archive(group._id)).toMatchObject({ _id: group._id, kind: 'group' });
+
+    // Of all kinds or of one; sorted here, as all three may have gone in the same millisecond.
+    expect(idsOf(await alice.archive.list()).toSorted()).toEqual(
+      [group._id, room._id, workpiece._id].toSorted(),
+    );
+    expect(idsOf(await alice.archive.list({ kind: 'room' }))).toEqual([room._id]);
+    await expect(bob.archive.restore(room._id)).rejects.toMatchObject({ status: 404 });
+
+    // The room first, then the workpiece, which goes back into it.
+    expect(await alice.archive.restore(room._id)).toEqual({ restored: true });
+    expect(await alice.archive.restore(workpiece._id)).toEqual({ restored: true });
+    expect((await alice.rooms.get(room._id)).workpieces).toEqual([workpiece._id]);
+
+    expect(await alice.archive.remove(group._id, { reason: 'vorbei' })).toEqual({ deleted: true });
+    await expect(alice.groups.get(group._id)).rejects.toMatchObject({ status: 404 });
+    expect(await alice.archive.list()).toEqual([]);
   });
 
   it('throws a CollabKitError with the status and the words of CK', async () => {

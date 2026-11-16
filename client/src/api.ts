@@ -24,6 +24,7 @@ export interface CollabKitApi {
   readonly groups: GroupRoutes;
   readonly grants: GrantRoutes;
   readonly workpieces: WorkpieceRoutes;
+  readonly archive: ArchiveRoutes;
   readonly comments: CommentRoutes;
   readonly tasks: TaskRoutes;
   readonly events: EventRoutes;
@@ -345,6 +346,22 @@ export interface UnitsAt<Value = unknown> {
   readonly upToUpdateId?: string;
 }
 
+/** What can go into the archive. */
+export type ArchiveKind = 'workpiece' | 'room' | 'group';
+
+/** A thing in the archive; restored, it is back under the same key. */
+export interface ArchiveEntry {
+  readonly _id: string;
+  readonly kind: ArchiveKind;
+  readonly name: string;
+  readonly archivedAt: string;
+  readonly reason?: string;
+  /** Only at a workpiece: the rooms it and its forks stood in. */
+  readonly rooms?: readonly { readonly workpiece: string; readonly room: string }[];
+  /** Only at a workpiece: its forks at any depth, archived with it. */
+  readonly forks?: readonly string[];
+}
+
 /** The newest trace of one person. */
 export interface Activity {
   readonly actorId: string;
@@ -443,6 +460,8 @@ export interface RoomRoutes {
   get(id: string): Promise<Named<Room>>;
   update(id: string, change: PlaceChange): Promise<Named<Room>>;
   remove(id: string, options?: Reasoned): Promise<{ readonly deleted: boolean }>;
+  /** Into the archive with all that hangs on it; its workpieces stay. Takes manage at it. */
+  archive(id: string, options?: Reasoned): Promise<ArchiveEntry>;
   addWorkpiece(id: string, workpieceId: string): Promise<Named<Room>>;
   removeWorkpiece(id: string, workpieceId: string): Promise<Named<Room>>;
   events(id: string, query?: RoomEventQuery): Promise<Named<CollabEvent>[]>;
@@ -465,6 +484,8 @@ export interface GroupRoutes {
   get(id: string): Promise<Named<Group>>;
   update(id: string, change: PlaceChange): Promise<Named<Group>>;
   remove(id: string, options?: Reasoned): Promise<{ readonly deleted: boolean }>;
+  /** Into the archive with its members; its grants open nothing meanwhile. Takes manage at it. */
+  archive(id: string, options?: Reasoned): Promise<ArchiveEntry>;
   addMember(id: string, actorId: string): Promise<Named<Group>>;
   removeMember(id: string, actorId: string): Promise<Named<Group>>;
 }
@@ -547,6 +568,23 @@ export interface WorkpieceRoutes {
   checkpoint(id: string, checkpoint?: NewCheckpoint): Promise<Named<CollabEvent>>;
   fork(id: string, fork: NewFork): Promise<Named<Workpiece>>;
   merge(id: string, merge: NewMerge): Promise<Named<CollabEvent>>;
+  /** Into the archive with its forks and all that hangs on them; open sessions end with 4403. */
+  archive(id: string, options?: Reasoned): Promise<ArchiveEntry>;
+}
+
+/** Entries of one kind, or of all. */
+export interface ArchiveQuery {
+  readonly kind?: ArchiveKind;
+}
+
+/** The routes under /archive: what was archived, bringing it back, deleting it for good. */
+export interface ArchiveRoutes {
+  /** The entries the token saw while they were live, newest first. */
+  list(query?: ArchiveQuery): Promise<ArchiveEntry[]>;
+  /** Brings it back unchanged under its keys; takes manage at it, as archiving did. */
+  restore(id: string): Promise<{ readonly restored: true }>;
+  /** Deletes it with all it holds, and every grant at it; takes manage everywhere. */
+  remove(id: string, options?: Reasoned): Promise<{ readonly deleted: true }>;
 }
 
 /** A comment on a thing, or an answer to another comment on the same thing. */
