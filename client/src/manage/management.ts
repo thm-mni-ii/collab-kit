@@ -24,6 +24,7 @@ export class Management extends LitElement implements ManagementElement {
     ck: { attribute: false },
     newWorkpiece: { attribute: false },
     findPeople: { attribute: false },
+    tabs: { attribute: false },
     extraTabs: { attribute: false },
     language: { attribute: 'lang' },
     infoOpen: { state: true },
@@ -34,6 +35,7 @@ export class Management extends LitElement implements ManagementElement {
   declare ck: CollabKitApi | undefined;
   declare newWorkpiece: ManagementOptions['newWorkpiece'];
   declare findPeople: ManagementOptions['findPeople'];
+  declare tabs: ManagementOptions['tabs'];
   declare extraTabs: ManagementOptions['extraTabs'];
   /** The lang attribute; left out, the one of the page counts. */
   declare language: string | undefined;
@@ -131,6 +133,10 @@ export class Management extends LitElement implements ManagementElement {
     if (extra !== undefined && !(this.extraTabs ?? []).some((each) => each.id === extra)) {
       this.store.showExtra(undefined);
     }
+    // An own tab the tool took away is no longer shown either.
+    if (changed.has('tabs') || changed.has('extraTabs')) {
+      void this.store.fit();
+    }
   }
 
   protected override updated(): void {
@@ -143,7 +149,14 @@ export class Management extends LitElement implements ManagementElement {
       return nothing;
     }
     const { t } = this;
-    const { tab, extra, failure, saved, mayCreate } = this.store.state;
+    const { tab, extra, failure, saved } = this.store.state;
+    const shown = this.store.shownTabs();
+    const labels: Record<Tab, string> = {
+      rooms: t.rooms,
+      groups: t.groups,
+      workpieces: t.workpieces,
+      archive: t.archiveTab,
+    };
 
     return html`<div class="frame">
       <div class="title">
@@ -160,43 +173,40 @@ export class Management extends LitElement implements ManagementElement {
       <p class="subtitle">${t.intro}</p>
       ${this.infoOpen ? this.infoView(t) : nothing}
       <div class="bar" role="tablist">
-        ${this.tabButton('rooms', t.rooms)} ${this.tabButton('groups', t.groups)}
-        ${
-          mayCreate
-            ? html`${this.tabButton('workpieces', t.workpieces)}
-              ${this.tabButton('archive', t.archiveTab)}`
-            : nothing
-        }
+        ${shown.map((each) => this.tabButton(each, labels[each]))}
         ${(this.extraTabs ?? []).map((each) => this.extraButton(each.id, each.label))}
       </div>
       ${failure === undefined ? nothing : html`<p class="error banner" role="alert">${failure}</p>`}
       ${saved === undefined ? nothing : html`<p class="hint banner" role="status">${saved}</p>`}
       ${
-        extra === undefined
-          ? html`<div class="body">
-              <div class="list">
-                ${
-                  tab === 'workpieces'
-                    ? this.workpieceList(t)
-                    : tab === 'archive'
-                      ? this.archiveList(t)
-                      : this.listView(t)
-                }
-              </div>
-              <div class="detail">
-                ${
-                  tab === 'rooms'
-                    ? this.roomDetail(t)
-                    : tab === 'groups'
-                      ? this.groupDetail(t)
+        extra === undefined && !shown.includes(tab)
+          ? // Neither an own tab nor one of the tool is left to show.
+            nothing
+          : extra === undefined
+            ? html`<div class="body">
+                <div class="list">
+                  ${
+                    tab === 'workpieces'
+                      ? this.workpieceList(t)
                       : tab === 'archive'
-                        ? this.archiveDetail(t)
-                        : this.workpieceDetail(t)
-                }
-              </div>
-            </div>`
-          : // What the tab shows the tool puts into its light DOM.
-            html`<div class="extra"><slot name=${extra}></slot></div>`
+                        ? this.archiveList(t)
+                        : this.listView(t)
+                  }
+                </div>
+                <div class="detail">
+                  ${
+                    tab === 'rooms'
+                      ? this.roomDetail(t)
+                      : tab === 'groups'
+                        ? this.groupDetail(t)
+                        : tab === 'archive'
+                          ? this.archiveDetail(t)
+                          : this.workpieceDetail(t)
+                  }
+                </div>
+              </div>`
+            : // What the tab shows the tool puts into its light DOM.
+              html`<div class="extra"><slot name=${extra}></slot></div>`
       }
     </div>`;
   }
