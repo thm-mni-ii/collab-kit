@@ -3,6 +3,8 @@ import { MongoClient, type Db } from 'mongodb';
 export interface Storage {
   readonly client: MongoClient;
   readonly db: Db;
+  /** Next to db in the same replica set, so one transaction can move between the two. */
+  readonly archive: Db;
   close(): Promise<void>;
 }
 
@@ -23,10 +25,13 @@ export async function connect(options: ConnectOptions): Promise<Storage> {
     await client.connect();
     const db = client.db(options.database);
     await db.command({ ping: 1 });
+    // A second database on the same server; MongoDB creates it with its first collection.
+    const archive = client.db(`${options.database}_archive`);
 
     return {
       client,
       db,
+      archive,
       close: async () => {
         await client.close();
       },
