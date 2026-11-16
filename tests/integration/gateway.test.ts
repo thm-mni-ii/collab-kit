@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createTokenCheck } from '../../src/auth/token.ts';
 import { applyDefinitions } from '../../src/db/apply.ts';
+import { archiveDefinitions } from '../../src/db/archive/definitions.ts';
 import { connect, type Storage } from '../../src/db/client.ts';
 import { createWorkpiece } from '../../src/db/collections/workpieces.ts';
 import { createGroup } from '../../src/db/collections/groups.ts';
@@ -125,6 +126,7 @@ function close(socket: WebSocket): Promise<void> {
 beforeAll(async () => {
   storage = await connect({ uri, database });
   await applyDefinitions(storage.db, collectionDefinitions);
+  await applyDefinitions(storage.archive, archiveDefinitions);
 
   const workpiece = await createWorkpiece(storage.db, { name: 'Entwurf', createdBy: 'alice' });
   workpieceId = workpiece._id.toHexString();
@@ -163,6 +165,7 @@ afterAll(async () => {
   await gateway.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await storage.db.dropDatabase();
+  await storage.archive.dropDatabase();
   await storage.close();
 });
 
@@ -582,13 +585,13 @@ describe('when access is taken away', () => {
     await expect(Promise.all(closing)).resolves.toEqual([4403, 4403]);
   });
 
-  it('closes the connection of whoever was in through the deleted group only', async () => {
+  it('closes the connection of whoever was in through the archived group only', async () => {
     const { workpiece, all } = await seminar();
     const bob = await openAs('bob', workpiece);
     const carol = await openAs('carol', workpiece);
     const bobClosing = closedWith(bob);
 
-    expect((await removeAsAlice(`/groups/${all.toHexString()}`)).status).toBe(200);
+    expect((await asAlice('POST', `/groups/${all.toHexString()}/archive`, {})).status).toBe(200);
     await expect(bobClosing).resolves.toBe(4403);
 
     // carol still gets in through the other group of the room.
@@ -598,14 +601,14 @@ describe('when access is taken away', () => {
     await close(carol);
   });
 
-  it('closes every connection when the room is deleted', async () => {
+  it('closes every connection when the room is archived', async () => {
     const { workpiece, room } = await seminar();
     const closing = [
       closedWith(await openAs('bob', workpiece)),
       closedWith(await openAs('carol', workpiece)),
     ];
 
-    expect((await removeAsAlice(`/rooms/${room.toHexString()}`)).status).toBe(200);
+    expect((await asAlice('POST', `/rooms/${room.toHexString()}/archive`, {})).status).toBe(200);
     await expect(Promise.all(closing)).resolves.toEqual([4403, 4403]);
   });
 });
