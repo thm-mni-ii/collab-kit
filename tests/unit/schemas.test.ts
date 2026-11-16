@@ -46,7 +46,6 @@ describe('archiveDefinitions', () => {
       'comments',
       'workpieces',
       'events',
-      'grants',
       'groups',
       'pseudonyms',
       'rooms',

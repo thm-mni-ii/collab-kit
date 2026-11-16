@@ -3,14 +3,14 @@ import type { Db, ObjectId } from 'mongodb';
 
 import { rightsAtEntry } from '../auth/access.ts';
 import { ARCHIVE_KINDS, type ArchiveKind } from '../db/archive/definitions.ts';
-import { findEntry, listEntries, restoreWorkpiece } from '../db/archive/move.ts';
+import { findEntry, listEntries, restoreEntry } from '../db/archive/move.ts';
 import { archiveOf } from '../db/client.ts';
 import type { Actor } from '../model/actor.ts';
 import type { Right } from '../model/right.ts';
 import { actorOf, fail, guard, idOf, requireId } from './http.ts';
 
 /** What was archived, and bringing it back; archiving itself sits with each kind's routes. */
-export function archiveRoutes(db: Db): Router {
+export function archiveRoutes(db: Db, recheckAccess: () => Promise<void>): Router {
   const archive = archiveOf(db);
   const routes = Router();
 
@@ -51,15 +51,19 @@ export function archiveRoutes(db: Db): Router {
   });
 
   routes.post('/archive/:id/restore', seeing, restoring, async (request, response) => {
-    const restored = await restoreWorkpiece(db, archive, idOf(request), {
+    const restored = await restoreEntry(db, archive, idOf(request), {
       restoredBy: actorOf(request).actorId,
     });
 
     // Restored by someone else in the meantime.
-    if (!restored) {
+    if (restored === null) {
       return fail(response, 404, 'unknown archive entry');
     }
-    response.json({ restored });
+    // A room or group back opens again what it opened, so connections are asked again.
+    if (restored.kind !== 'workpiece') {
+      await recheckAccess();
+    }
+    response.json({ restored: true });
   });
 
   return routes;

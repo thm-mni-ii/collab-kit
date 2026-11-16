@@ -14,7 +14,7 @@ import { archiveDefinitions, type EntryRecord } from '../../src/db/archive/defin
 import { connect, type Storage } from '../../src/db/client.ts';
 import { createComment } from '../../src/db/collections/comments.ts';
 import { setGrant } from '../../src/db/collections/grants.ts';
-import { createGroup, deleteGroup } from '../../src/db/collections/groups.ts';
+import { createGroup } from '../../src/db/collections/groups.ts';
 import { pseudonymOf } from '../../src/db/collections/pseudonyms.ts';
 import { addToRoom, createRoom, findRoom } from '../../src/db/collections/rooms.ts';
 import { storeSnapshot } from '../../src/db/collections/snapshots.ts';
@@ -41,17 +41,35 @@ const secret = 'geheimnis-des-werkzeugs';
 const database = `collab_kit_archive_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const silent = pino({ level: 'silent' });
 
-/** Collections whose content comes back exactly as it went. */
-const RETURNING = ['workpieces', 'updates', 'comments', 'tasks', 'pseudonyms', 'grants'] as const;
+/** Collections whose content comes back exactly as it went; grants never leave. */
+const RETURNING = [
+  'workpieces',
+  'updates',
+  'comments',
+  'tasks',
+  'pseudonyms',
+  'grants',
+  'rooms',
+  'groups',
+] as const;
 
 /** Events that tell of the archive itself and so stay live. */
-const ABOUT_ARCHIVE = new Set(['workpiece-archived', 'workpiece-restored']);
+const ABOUT_ARCHIVE = new Set([
+  'workpiece-archived',
+  'workpiece-restored',
+  'room-archived',
+  'room-restored',
+  'group-archived',
+  'group-restored',
+]);
 
 let storage: Storage;
 let hub: WorkpieceHub;
 let gateway: Gateway;
 let server: ReturnType<typeof createServer>;
 let port: number;
+/** How often the routes asked the open connections again. */
+let rechecks = 0;
 
 const tokenOf = (actor: string) =>
   jwt.sign({ sub: actor, name: actor }, secret, { expiresIn: '15m' });
@@ -204,6 +222,36 @@ const listAs = async (actor: string, kind?: string) =>
       .set(as(actor))
   ).body as EntryRecord[];
 
+/** Archives a room or a group as this person. */
+const archiveKindAs = (actor: string, kind: 'rooms' | 'groups', id: ObjectId) =>
+  request(server).post(`/${kind}/${id.toHexString()}/archive`).set(as(actor)).send({});
+
+/** The status a GET answers this person with. */
+const statusAs = async (actor: string, path: string) =>
+  (await request(server).get(path).set(as(actor))).status;
+
+/** A group whose member erin sees the room, which the managers of the room manage. */
+async function teamIn(roomId: ObjectId, managersId: ObjectId): Promise<ObjectId> {
+  const team = await createGroup(storage.db, {
+    name: 'Team',
+    createdBy: 'alice',
+    members: ['erin'],
+  });
+  await setGrant(storage.db, {
+    groupId: team._id,
+    scope: { kind: 'room', id: roomId },
+    rights: ['see'],
+    setBy: 'alice',
+  });
+  await setGrant(storage.db, {
+    groupId: managersId,
+    scope: { kind: 'group', id: team._id },
+    rights: ['see', 'manage'],
+    setBy: 'alice',
+  });
+  return team._id;
+}
+
 /** The keys of entries as JSON carries them. */
 const idsIn = (entries: EntryRecord[]) => entries.map((entry) => String(entry._id));
 
@@ -237,11 +285,26 @@ beforeAll(async () => {
       hub,
       checkToken,
       logger: silent,
-      // Workpieces close their own connections; rooms and groups come later.
-      recheckAccess: async () => {},
+      // Counted, and passed on to the gateway attached below.
+      recheckAccess: async () => {
+        rechecks += 1;
+        await gateway.recheck();
+      },
     }),
   });
   gateway = attachGateway({ server, db: storage.db, hub, checkToken, logger: silent });
+
+  // admin manages everywhere, for orders in which nobody else could reach a thing any more.
+  const admins = await createGroup(storage.db, {
+    name: 'Verwaltung',
+    createdBy: 'admin',
+    members: ['admin'],
+  });
+  await setGrant(storage.db, {
+    groupId: admins._id,
+    rights: ['see', 'edit', 'manage'],
+    setBy: 'admin',
+  });
 
   await new Promise<void>((resolve) => server.listen(0, resolve));
   port = (server.address() as AddressInfo).port;
@@ -272,7 +335,8 @@ describe('archiving a workpiece', () => {
       rooms: [{ workpiece: id.toHexString(), room: roomId.toHexString() }],
       forks: [],
     });
-    expect(archived.body.grants).toHaveLength(1);
+    // Grants stay where they are.
+    expect(await contentOf(storage.db)).toMatchObject({ grants: before['grants'] });
 
     // Live nothing is left of it, not even in its room; the archive holds it, one snapshot only.
     expect(await countsAt(storage.db, id)).toEqual({
@@ -374,7 +438,7 @@ describe('archiving a workpiece', () => {
     expect((await restoreAs('alice', id)).status).toBe(404);
   });
 
-  it('drops a grant whose group was deleted while it lay in the archive', async () => {
+  it('leaves a grant at it live, opening nothing until it is back', async () => {
     const { id } = await roomWithWorkpiece();
     const guests = await createGroup(storage.db, {
       name: 'Gaeste',
@@ -387,15 +451,43 @@ describe('archiving a workpiece', () => {
       rights: ['see'],
       setBy: 'alice',
     });
+    expect(await statusAs('dave', `/workpieces/${id.toHexString()}`)).toBe(200);
 
     expect((await archiveAs('alice', id)).status).toBe(200);
-    await deleteGroup(storage.db, guests._id, { deletedBy: 'alice' });
-    expect((await restoreAs('alice', id)).status).toBe(200);
+    expect(await storage.db.collection('grants').countDocuments({ groupId: guests._id })).toBe(1);
+    expect(await statusAs('dave', `/workpieces/${id.toHexString()}`)).toBe(404);
 
-    expect(await storage.db.collection('grants').countDocuments({ groupId: guests._id })).toBe(0);
-    expect(await storage.archive.collection('grants').countDocuments({ groupId: guests._id })).toBe(
-      0,
-    );
+    expect((await restoreAs('alice', id)).status).toBe(200);
+    expect(await statusAs('dave', `/workpieces/${id.toHexString()}`)).toBe(200);
+  });
+
+  it('does not keep anyone from taking in members for a grant at it', async () => {
+    const { managersId, id } = await roomWithWorkpiece();
+    const guests = await createGroup(storage.db, {
+      name: 'Gaeste',
+      createdBy: 'alice',
+      members: ['dave'],
+    });
+    await setGrant(storage.db, {
+      groupId: managersId,
+      scope: { kind: 'group', id: guests._id },
+      rights: ['see', 'manage'],
+      setBy: 'alice',
+    });
+    await setGrant(storage.db, {
+      groupId: guests._id,
+      scope: { kind: 'workpiece', id },
+      rights: ['see'],
+      setBy: 'alice',
+    });
+
+    // alice manages the workpiece only through its room, which it left when archived.
+    expect((await archiveAs('alice', id)).status).toBe(200);
+    const added = await request(server)
+      .post(`/groups/${guests._id.toHexString()}/members`)
+      .set(as('alice'))
+      .send({ actorId: 'frank' });
+    expect(added.status).toBe(201);
   });
 
   it('closes open connections with 4403 and turns new ones away', async () => {
@@ -435,5 +527,132 @@ describe('archiving a workpiece', () => {
     letGo();
     await holding;
     expect((await archiveAs('alice', id)).status).toBe(200);
+  });
+});
+
+describe('archiving a room', () => {
+  it('moves it with what hangs on it, leaves its workpieces live and brings it back', async () => {
+    const { roomId, id } = await roomWithWorkpiece();
+    const room = { kind: 'room' as const, id: roomId };
+    await createComment(storage.db, {
+      kind: 'note',
+      anchor: room,
+      createdBy: 'bob',
+      body: { text: 'Raumfrage' },
+    });
+    await pseudonymOf(storage.db, room, 'bob');
+    const before = await contentOf(storage.db);
+    const workpiece = `/workpieces/${id.toHexString()}`;
+    expect(await statusAs('bob', workpiece)).toBe(200);
+
+    // carol sees nothing, bob only sees.
+    expect((await archiveKindAs('carol', 'rooms', roomId)).status).toBe(404);
+    expect((await archiveKindAs('bob', 'rooms', roomId)).status).toBe(403);
+    const counted = rechecks;
+    const archived = await archiveKindAs('alice', 'rooms', roomId);
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ _id: roomId.toHexString(), kind: 'room' });
+    expect(rechecks).toBe(counted + 1);
+
+    // The room and its thread are gone, its workpiece stays, and so does what opens it.
+    expect(await findRoom(storage.db, roomId)).toBeNull();
+    expect(await storage.db.collection('comments').countDocuments({ 'anchor.id': roomId })).toBe(0);
+    expect(await storage.db.collection('pseudonyms').countDocuments({ 'about.id': roomId })).toBe(
+      0,
+    );
+    expect(await storage.db.collection('workpieces').countDocuments({ _id: id })).toBe(1);
+    expect(await statusAs('bob', workpiece)).toBe(404);
+    expect(idsIn(await listAs('bob', 'room'))).toContain(roomId.toHexString());
+
+    expect((await restoreAs('alice', roomId)).status).toBe(200);
+    expect(rechecks).toBe(counted + 2);
+    expect(await contentOf(storage.db)).toEqual(before);
+    expect(await statusAs('bob', workpiece)).toBe(200);
+  });
+
+  it('gets its workpiece back in whatever order both left and return', async () => {
+    for (const archivedFirst of ['room', 'workpiece'] as const) {
+      for (const restoredFirst of ['room', 'workpiece'] as const) {
+        // eslint-disable-next-line no-await-in-loop
+        const { roomId, id } = await roomWithWorkpiece();
+        const archiveRoom = () => archiveKindAs('admin', 'rooms', roomId);
+        const archiveWorkpiece = () => archiveAs('admin', id);
+        const steps =
+          archivedFirst === 'room'
+            ? [archiveRoom, archiveWorkpiece]
+            : [archiveWorkpiece, archiveRoom];
+        const restores = restoredFirst === 'room' ? [roomId, id] : [id, roomId];
+
+        for (const step of steps) {
+          // eslint-disable-next-line no-await-in-loop
+          expect((await step()).status).toBe(200);
+        }
+        for (const entryId of restores) {
+          // eslint-disable-next-line no-await-in-loop
+          expect((await restoreAs('admin', entryId)).status).toBe(200);
+        }
+        // eslint-disable-next-line no-await-in-loop
+        expect((await findRoom(storage.db, roomId))?.workpieces).toEqual([id]);
+      }
+    }
+  });
+});
+
+describe('archiving a group', () => {
+  it('moves it with its members, keeps its grants live and brings it back', async () => {
+    const { roomId, managersId, id } = await roomWithWorkpiece();
+    const team = await teamIn(roomId, managersId);
+    await createComment(storage.db, {
+      kind: 'note',
+      anchor: { kind: 'group', id: team },
+      createdBy: 'alice',
+      body: { text: 'Gruppennotiz' },
+    });
+    const before = await contentOf(storage.db);
+    const workpiece = `/workpieces/${id.toHexString()}`;
+    expect(await statusAs('erin', workpiece)).toBe(200);
+
+    // carol sees nothing, erin sees her group but does not manage it.
+    expect((await archiveKindAs('carol', 'groups', team)).status).toBe(404);
+    expect((await archiveKindAs('erin', 'groups', team)).status).toBe(403);
+    const counted = rechecks;
+    const archived = await archiveKindAs('alice', 'groups', team);
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ _id: team.toHexString(), kind: 'group', name: 'Team' });
+    expect(rechecks).toBe(counted + 1);
+
+    // The group and its note are gone; its grant stays, but opens nothing for erin meanwhile.
+    expect(await storage.db.collection('groups').countDocuments({ _id: team })).toBe(0);
+    expect(await storage.db.collection('comments').countDocuments({ 'anchor.id': team })).toBe(0);
+    expect(await storage.db.collection('grants').countDocuments({ groupId: team })).toBe(1);
+    expect(await statusAs('erin', workpiece)).toBe(404);
+
+    expect((await restoreAs('alice', team)).status).toBe(200);
+    expect(rechecks).toBe(counted + 2);
+    expect(await contentOf(storage.db)).toEqual(before);
+    expect(await statusAs('erin', workpiece)).toBe(200);
+  });
+
+  it('opens the room again through its grant, whichever of the two comes back first', async () => {
+    for (const restoredFirst of ['group', 'room'] as const) {
+      // eslint-disable-next-line no-await-in-loop
+      const { roomId, managersId, id } = await roomWithWorkpiece();
+      // eslint-disable-next-line no-await-in-loop
+      const team = await teamIn(roomId, managersId);
+
+      // eslint-disable-next-line no-await-in-loop
+      expect((await archiveKindAs('alice', 'groups', team)).status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await archiveKindAs('alice', 'rooms', roomId)).status).toBe(200);
+
+      for (const entryId of restoredFirst === 'group' ? [team, roomId] : [roomId, team]) {
+        // eslint-disable-next-line no-await-in-loop
+        expect(await statusAs('erin', `/workpieces/${id.toHexString()}`)).toBe(404);
+        // eslint-disable-next-line no-await-in-loop
+        expect((await restoreAs('alice', entryId)).status).toBe(200);
+      }
+      // eslint-disable-next-line no-await-in-loop
+      expect(await statusAs('erin', `/workpieces/${id.toHexString()}`)).toBe(200);
+    }
   });
 });

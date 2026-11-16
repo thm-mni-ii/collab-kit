@@ -2,6 +2,8 @@ import { Router } from 'express';
 import type { Db } from 'mongodb';
 
 import { groupsVisibleTo, may, mayAddMember, maySee, maySeeGroup } from '../auth/access.ts';
+import { archiveGroup } from '../db/archive/move.ts';
+import { archiveOf } from '../db/client.ts';
 import {
   addMember,
   createGroup,
@@ -37,6 +39,7 @@ export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
     403,
     'not allowed to change this group',
   );
+  const archive = archiveOf(db);
   // Taking someone in hands on what the group holds, so it takes more than managing it.
   const adding = guard(
     (actor, id) => mayAddMember(db, actor, id),
@@ -149,6 +152,28 @@ export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
       await recheckAccess();
     }
     response.json({ deleted });
+  });
+
+  /** Moves the group with its members into the archive; its grants stay and open nothing meanwhile. */
+  routes.post('/groups/:id/archive', seeing, changing, async (request, response) => {
+    const body = bodyOf(request);
+    const reason = asText(body['reason']);
+    const unusable = unusableField(body, { reason });
+    if (unusable !== undefined) {
+      return fail(response, 400, `${unusable} is unusable`);
+    }
+
+    const entry = await archiveGroup(db, archive, idOf(request), {
+      archivedBy: actorOf(request).actorId,
+      ...defined({ reason }),
+    });
+    // Archived by someone else in the meantime.
+    if (entry === undefined) {
+      return fail(response, 404, 'unknown group');
+    }
+    // Its members lose what it opened, so their connections are asked again.
+    await recheckAccess();
+    response.json(entry);
   });
 
   routes.post('/groups/:id/members', seeing, adding, async (request, response) => {

@@ -3,6 +3,8 @@ import type { Db, ObjectId } from 'mongodb';
 
 import { may, maySee, roomsVisibleTo } from '../auth/access.ts';
 import { readerOf, unstampedFor } from '../auth/anonymity.ts';
+import { archiveRoom } from '../db/archive/move.ts';
+import { archiveOf } from '../db/client.ts';
 import { grantsAt } from '../db/collections/grants.ts';
 import { latestPerActor, readEventsSince, withoutAnchor } from '../db/collections/events.ts';
 import {
@@ -36,6 +38,7 @@ export function roomRoutes(db: Db, hub: WorkpieceHub, recheckAccess: () => Promi
     403,
     'not allowed to change this room',
   );
+  const archive = archiveOf(db);
 
   routes.post('/rooms', async (request, response) => {
     // A room lies in nothing, so creating one takes manage everywhere.
@@ -118,6 +121,28 @@ export function roomRoutes(db: Db, hub: WorkpieceHub, recheckAccess: () => Promi
       await recheckAccess();
     }
     response.json({ deleted });
+  });
+
+  /** Moves the room with all that hangs on it into the archive; its workpieces stay live. */
+  routes.post('/rooms/:id/archive', seeing, changing, async (request, response) => {
+    const body = bodyOf(request);
+    const reason = asText(body['reason']);
+    const unusable = unusableField(body, { reason });
+    if (unusable !== undefined) {
+      return fail(response, 400, `${unusable} is unusable`);
+    }
+
+    const entry = await archiveRoom(db, archive, idOf(request), {
+      archivedBy: actorOf(request).actorId,
+      ...defined({ reason }),
+    });
+    // Archived by someone else in the meantime.
+    if (entry === undefined) {
+      return fail(response, 404, 'unknown room');
+    }
+    // Without the room, open connections to what it opened would carry on.
+    await recheckAccess();
+    response.json(entry);
   });
 
   routes.post('/rooms/:id/workpieces', seeing, changing, async (request, response) => {

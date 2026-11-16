@@ -27,15 +27,13 @@ export interface EntryRecord {
   rooms?: Placement[];
   /** The forks that went along with a workpiece, at any depth. */
   forks?: ObjectId[];
-  /** The grants this entry holds, as a grant hangs on a group and a place at once. */
-  grants: ObjectId[];
 }
 
 export const entriesDefinition: CollectionDefinition = {
   name: 'entries',
   schema: {
     bsonType: 'object',
-    required: ['kind', 'name', 'archivedAt', 'grants'],
+    required: ['kind', 'name', 'archivedAt'],
     properties: {
       kind: { enum: [...ARCHIVE_KINDS] },
       name: { bsonType: 'string' },
@@ -50,12 +48,12 @@ export const entriesDefinition: CollectionDefinition = {
         },
       },
       forks: { bsonType: 'array', items: { bsonType: 'objectId' } },
-      grants: { bsonType: 'array', items: { bsonType: 'objectId' } },
     },
   },
   compressor: 'zstd',
 };
 
+// Grants never move: one at something archived simply opens nothing until it is back.
 /** The live collections that move, each with only the indexes restore and delete look up by. */
 const lookups: Readonly<Record<string, readonly IndexDescription[]>> = {
   workpieces: [],
@@ -67,13 +65,12 @@ const lookups: Readonly<Record<string, readonly IndexDescription[]>> = {
     { key: { 'anchor.id': 1 }, name: 'anchor_id' },
     { key: { parentId: 1 }, name: 'parent_id' },
   ],
-  // Found through the ids their entry lists.
-  grants: [],
   events: [
     { key: { 'anchor.id': 1 }, name: 'anchor_id' },
     { key: { 'about.id': 1 }, name: 'about_id' },
   ],
-  rooms: [],
+  // An archived room still lists its workpieces, so a workpiece finds its way back into it.
+  rooms: [{ key: { workpieces: 1 }, name: 'workpieces' }],
   groups: [],
 };
 
