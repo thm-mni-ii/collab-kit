@@ -12,6 +12,7 @@ import {
   workpieceExists,
   type Workpiece,
 } from '../db/collections/workpieces.ts';
+import type { EntryRecord } from '../db/archive/definitions.ts';
 import { findComment, type CommentRecord } from '../db/collections/comments.ts';
 import { flaggedAt, grantsOf, placesWhere, rightsHeld } from '../db/collections/grants.ts';
 import {
@@ -60,6 +61,42 @@ export async function rightsAt(
     groups.map((group) => group._id),
     [...places.values()],
   );
+}
+
+/** Every right the actor holds at an archived thing: at its former rooms, by its own grants, everywhere. */
+export async function rightsAtEntry(
+  db: Db,
+  archive: Db,
+  actor: Actor,
+  entry: EntryRecord,
+): Promise<ReadonlySet<Right>> {
+  if (actor.top === true) {
+    return new Set(RIGHTS);
+  }
+
+  const groups = (await groupsOf(db, actor.actorId)).map((group) => group._id);
+  if (groups.length === 0) {
+    return new Set();
+  }
+
+  // Live above it: the rooms it stood in and, to whoever forked it, its source.
+  const rooms = (entry.rooms ?? [])
+    .filter((placement) => placement.workpiece.equals(entry._id))
+    .map((placement) => ({ kind: 'room' as const, id: placement.room }));
+  const source = await sourceOfOwnFork(archive, entry._id, actor.actorId);
+  const liveAbove: Reference[] = [
+    ...rooms,
+    ...(source === undefined ? [] : [{ kind: 'workpiece' as const, id: source }]),
+  ];
+  const places = new Map<string, Reference>();
+  await Promise.all(liveAbove.map((place) => collectPlaces(db, place, places, actor.actorId)));
+
+  // Its own grants went into the archive along with it.
+  const [live, archived] = await Promise.all([
+    rightsHeld(db, groups, [...places.values()]),
+    rightsHeld(archive, groups, [{ kind: entry.kind, id: entry._id }]),
+  ]);
+  return new Set([...live, ...archived]);
 }
 
 /** Whether the actor may hand these rights on at the place: manage there and each of them held. */

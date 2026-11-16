@@ -15,6 +15,11 @@ export interface ConnectOptions {
   readonly serverSelectionTimeoutMs?: number;
 }
 
+/** The archive next to a database: a second one on the same server, so one transaction spans both. */
+export function archiveOf(db: Db): Db {
+  return db.client.db(`${db.databaseName}_archive`);
+}
+
 /** Opens the single connection pool and pings it, so a wrong address fails at startup. */
 export async function connect(options: ConnectOptions): Promise<Storage> {
   const client = new MongoClient(options.uri, {
@@ -25,13 +30,11 @@ export async function connect(options: ConnectOptions): Promise<Storage> {
     await client.connect();
     const db = client.db(options.database);
     await db.command({ ping: 1 });
-    // A second database on the same server; MongoDB creates it with its first collection.
-    const archive = client.db(`${options.database}_archive`);
-
     return {
       client,
       db,
-      archive,
+      // MongoDB creates it with its first collection.
+      archive: archiveOf(db),
       close: async () => {
         await client.close();
       },

@@ -4,6 +4,8 @@ import type { Logger } from 'pino';
 
 import { may, maySee, workpiecesVisibleTo } from '../auth/access.ts';
 import { readerOf, stampsFor } from '../auth/anonymity.ts';
+import { archiveWorkpiece, forksUnder } from '../db/archive/move.ts';
+import { archiveOf } from '../db/client.ts';
 import { addToRoom } from '../db/collections/rooms.ts';
 import { createWorkpiece, findWorkpiece } from '../db/collections/workpieces.ts';
 import { latestPerActor, withoutAnchor } from '../db/collections/events.ts';
@@ -16,6 +18,7 @@ import {
   readDocAt,
   readStateAt,
   unitsIn,
+  WorkpieceWithheld,
   type WorkpieceHub,
 } from '../realtime/index.ts';
 import { asCount, asObject, asObjectId, asText, asUnits } from '../utils/input.ts';
@@ -49,6 +52,13 @@ export function workpieceRoutes(db: Db, hub: WorkpieceHub, logger: Logger): Rout
     403,
     'not allowed to change this workpiece',
   );
+  // Archiving takes it out of everyone's hands, so only whoever manages it; behind seeing.
+  const managing = guard(
+    (actor, id) => may(db, actor, 'manage', { kind: 'workpiece', id }),
+    403,
+    'not allowed to archive this workpiece',
+  );
+  const archive = archiveOf(db);
 
   /** Why a new workpiece is refused: it takes edit where it lies, room, source or everywhere. */
   async function refusalToCreate(
@@ -309,14 +319,57 @@ export function workpieceRoutes(db: Db, hub: WorkpieceHub, logger: Logger): Rout
       return fail(response, 404, 'unknown workpiece to merge from');
     }
 
-    const merged = await mergeWorkpiece(db, hub, id, {
-      from,
-      createdBy: actor.actorId,
-      ...defined({ reason }),
-    });
+    let merged;
+    try {
+      merged = await mergeWorkpiece(db, hub, id, {
+        from,
+        createdBy: actor.actorId,
+        ...defined({ reason }),
+      });
+    } catch (error) {
+      if (error instanceof WorkpieceWithheld) {
+        return fail(response, 409, 'workpiece is being archived');
+      }
+      throw error;
+    }
     response
       .status(201)
       .json(await withNames(db, merged, readerOf(db, actorOf(request)), EVENTS_AT_ANCHOR));
+  });
+
+  /** Moves the workpiece and its forks into the archive; everyone connected is let go first. */
+  routes.post('/workpieces/:id/archive', seeing, managing, async (request, response) => {
+    const body = bodyOf(request);
+    const reason = asText(body['reason']);
+    const unusable = unusableField(body, { reason });
+    if (unusable !== undefined) {
+      return fail(response, 400, `${unusable} is unusable`);
+    }
+
+    // Forks go along: once the source is gone, only their forkers could still reach them.
+    const id = idOf(request);
+    const forks = await forksUnder(db, id);
+    let entry;
+    try {
+      entry = await hub.withhold([id, ...forks], () =>
+        archiveWorkpiece(db, archive, id, {
+          forks,
+          archivedBy: actorOf(request).actorId,
+          ...defined({ reason }),
+        }),
+      );
+    } catch (error) {
+      if (error instanceof WorkpieceWithheld) {
+        return fail(response, 409, 'workpiece is being archived');
+      }
+      throw error;
+    }
+
+    // Archived by someone else in the meantime.
+    if (entry === undefined) {
+      return fail(response, 404, 'unknown workpiece');
+    }
+    response.json(entry);
   });
 
   return routes;

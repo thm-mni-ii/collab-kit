@@ -8,17 +8,23 @@ export const ARCHIVE_KINDS = ['workpiece', 'room', 'group'] as const;
 
 export type ArchiveKind = (typeof ARCHIVE_KINDS)[number];
 
+/** A workpiece and a room it stood in. */
+export interface Placement {
+  workpiece: ObjectId;
+  room: ObjectId;
+}
+
 /** One archived thing; its parts lie in the collections of the same name next to it. */
 export interface EntryRecord {
   /** The id the thing had live, so it comes back under the same one. */
   _id: ObjectId;
   kind: ArchiveKind;
   name: string;
+  /** Who archived it is in the event workpiece-archived, where pseudonyms are kept. */
   archivedAt: Date;
-  archivedBy: string;
   reason?: string;
-  /** The rooms a workpiece stood in, to put it back where it was. */
-  rooms?: ObjectId[];
+  /** The rooms a workpiece and its forks stood in, to put each back where it was. */
+  rooms?: Placement[];
   /** The forks that went along with a workpiece, at any depth. */
   forks?: ObjectId[];
   /** The grants this entry holds, as a grant hangs on a group and a place at once. */
@@ -29,14 +35,20 @@ export const entriesDefinition: CollectionDefinition = {
   name: 'entries',
   schema: {
     bsonType: 'object',
-    required: ['kind', 'name', 'archivedAt', 'archivedBy', 'grants'],
+    required: ['kind', 'name', 'archivedAt', 'grants'],
     properties: {
       kind: { enum: [...ARCHIVE_KINDS] },
       name: { bsonType: 'string' },
       archivedAt: { bsonType: 'date' },
-      archivedBy: { bsonType: 'string' },
       reason: { bsonType: 'string' },
-      rooms: { bsonType: 'array', items: { bsonType: 'objectId' } },
+      rooms: {
+        bsonType: 'array',
+        items: {
+          bsonType: 'object',
+          required: ['workpiece', 'room'],
+          properties: { workpiece: { bsonType: 'objectId' }, room: { bsonType: 'objectId' } },
+        },
+      },
       forks: { bsonType: 'array', items: { bsonType: 'objectId' } },
       grants: { bsonType: 'array', items: { bsonType: 'objectId' } },
     },
