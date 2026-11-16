@@ -687,6 +687,40 @@ describe('archiving a group', () => {
       expect(await statusAs('erin', `/workpieces/${id.toHexString()}`)).toBe(200);
     }
   });
+
+  it('leaves a grant out of GET /grants while its group or its place is archived', async () => {
+    const { roomId, managersId, readersId } = await roomWithWorkpiece();
+    const team = await teamIn(roomId, managersId);
+    /** The groups alice is shown holding a grant at the room. */
+    const atRoom = async () =>
+      (
+        await request(server)
+          .get('/grants')
+          .query({ scopeKind: 'room', scopeId: roomId.toHexString() })
+          .set(as('alice'))
+      ).body.map((grant: { groupId: string }) => grant.groupId);
+    /** The places alice is shown the team holding a grant at. */
+    const ofTeam = async () =>
+      (
+        await request(server).get('/grants').query({ groupId: team.toHexString() }).set(as('alice'))
+      ).body.map((grant: { scope: { id: string } }) => grant.scope.id);
+    const holders = [managersId, readersId, team].map(String).toSorted();
+
+    expect((await atRoom()).toSorted()).toEqual(holders);
+    expect(await ofTeam()).toEqual([String(roomId)]);
+
+    // The team in the archive: the room no longer lists it, then lists it again.
+    expect((await archiveKindAs('alice', 'groups', team)).status).toBe(200);
+    expect((await atRoom()).toSorted()).toEqual([managersId, readersId].map(String).toSorted());
+    expect((await restoreAs('alice', team)).status).toBe(200);
+    expect((await atRoom()).toSorted()).toEqual(holders);
+
+    // The room in the archive: the team no longer lists it, then lists it again.
+    expect((await archiveKindAs('alice', 'rooms', roomId)).status).toBe(200);
+    expect(await ofTeam()).toEqual([]);
+    expect((await restoreAs('alice', roomId)).status).toBe(200);
+    expect(await ofTeam()).toEqual([String(roomId)]);
+  });
 });
 
 describe('deleting from the archive', () => {

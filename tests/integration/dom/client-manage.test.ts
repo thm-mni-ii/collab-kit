@@ -553,6 +553,36 @@ describe('<ck-management>', () => {
     expect(rootOf(element).querySelector('.body')).not.toBeNull();
   });
 
+  it('shows only the own tabs the tool chose, in their order, and moves off one it takes away', async () => {
+    const element = await mount(alice, {
+      tabs: ['archive', 'groups'],
+      extraTabs: [{ id: 'import', label: 'Import' }],
+    });
+    const labels = () =>
+      find(rootOf(element), '.bar button').map((each) => each.textContent?.trim());
+    expect(labels()).toEqual(['Gruppen', 'Archiv', 'Import']);
+    expect(button(element, 'Gruppen').getAttribute('aria-selected')).toBe('true');
+
+    // The tool takes the open tab away: the first one left shows.
+    element.tabs = ['archive'];
+    await settled(element);
+    expect(labels()).toEqual(['Archiv', 'Import']);
+    expect(button(element, 'Archiv').getAttribute('aria-selected')).toBe('true');
+
+    // No own tab is left: the tab of the tool shows.
+    element.tabs = [];
+    await settled(element);
+    expect(labels()).toEqual(['Import']);
+    expect(rootOf(element).querySelector('.extra slot')?.getAttribute('name')).toBe('import');
+  });
+
+  it('leaves the archive out without manage everywhere, even when the tool chose it', async () => {
+    const element = await mount(bob, { tabs: ['groups', 'archive'] });
+    const labels = find(rootOf(element), '.bar button').map((each) => each.textContent?.trim());
+    expect(labels).toEqual(['Gruppen']);
+    expect(button(element, 'Gruppen').getAttribute('aria-selected')).toBe('true');
+  });
+
   it('archives a room, a group and a workpiece once asked, and restores or deletes them', async () => {
     const room = await alice.rooms.create({ name: 'Übung 13' });
     const group = await alice.groups.create({ name: 'Team M' });

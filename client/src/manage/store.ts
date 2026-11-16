@@ -9,6 +9,7 @@ import type {
   Grant,
   Group,
   ManagementOptions,
+  ManagementOwnTab,
   Named,
   Reference,
   Right,
@@ -24,7 +25,10 @@ export const RIGHTS: readonly Right[] = ['see', 'speak', 'edit', 'plan', 'decide
 export type Switch = Right | 'anonymous';
 
 /** Which list is shown; workpieces and archive only with manage everywhere. */
-export type Tab = 'rooms' | 'groups' | 'workpieces' | 'archive';
+export type Tab = ManagementOwnTab;
+
+/** Every own tab, in the order the bar shows them. */
+const TABS: readonly Tab[] = ['rooms', 'groups', 'workpieces', 'archive'];
 
 /** The tabs that take manage everywhere. */
 const TOP_TABS: ReadonlySet<Tab> = new Set(['workpieces', 'archive']);
@@ -158,20 +162,50 @@ export class Store {
       if (ck !== this.host.ck) {
         return;
       }
-      const mayCreate = everywhere.includes('manage');
       this.set({
-        mayCreate,
-        // Another person may lack manage everywhere, which the workpieces and the archive take.
-        tab: mayCreate || !TOP_TABS.has(this.state.tab) ? this.state.tab : 'rooms',
+        mayCreate: everywhere.includes('manage'),
         rooms: byName(rooms),
         groups: byName(groups),
         workpieces: new Map(workpieces.map((workpiece) => [workpiece._id, workpiece])),
         archived,
         loaded: true,
       });
+      // The tool, or another person lacking manage everywhere, may leave the current tab out.
+      const shown = this.shownTabs();
+      this.set({ tab: shown.includes(this.state.tab) ? this.state.tab : (shown[0] ?? 'rooms') });
       this.takeNames(...groups);
       await this.select(this.keptOrFirst(this.state.tab));
+      await this.fit();
     });
+  }
+
+  /** The own tabs in the bar: those the tool chose, workpieces and archive only with manage everywhere. */
+  shownTabs(): Tab[] {
+    const chosen = this.host.tabs ?? TABS;
+    return TABS.filter(
+      (tab) => chosen.includes(tab) && (this.state.mayCreate || !TOP_TABS.has(tab)),
+    );
+  }
+
+  /** Moves off an own tab no longer shown: to the first one left, else to the first tab of the tool. */
+  async fit(): Promise<void> {
+    if (!this.state.loaded || this.state.extra !== undefined) {
+      return;
+    }
+    const shown = this.shownTabs();
+    if (shown.includes(this.state.tab)) {
+      return;
+    }
+    const [first] = shown;
+    if (first !== undefined) {
+      await this.show(first);
+      return;
+    }
+    // No own tab is left, so a tab of the tool shows if there is one.
+    const [extra] = this.host.extraTabs ?? [];
+    if (extra !== undefined) {
+      this.showExtra(extra.id);
+    }
   }
 
   async show(tab: Tab): Promise<void> {
