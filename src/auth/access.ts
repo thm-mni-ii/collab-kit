@@ -12,6 +12,7 @@ import {
   workpieceExists,
   type Workpiece,
 } from '../db/collections/workpieces.ts';
+import type { EntryRecord } from '../db/archive/definitions.ts';
 import { findComment, type CommentRecord } from '../db/collections/comments.ts';
 import { flaggedAt, grantsOf, placesWhere, rightsHeld } from '../db/collections/grants.ts';
 import {
@@ -62,6 +63,38 @@ export async function rightsAt(
   );
 }
 
+/** Every right the actor holds at an archived thing: by its grants, which stay live, above it or everywhere. */
+export async function rightsAtEntry(
+  db: Db,
+  archive: Db,
+  actor: Actor,
+  entry: EntryRecord,
+): Promise<ReadonlySet<Right>> {
+  if (actor.top === true) {
+    return new Set(RIGHTS);
+  }
+
+  const groups = (await groupsOf(db, actor.actorId)).map((group) => group._id);
+  if (groups.length === 0) {
+    return new Set();
+  }
+
+  // Above it only what the archive still knows: the rooms it stood in and, to whoever forked it, its source.
+  const rooms = (entry.rooms ?? [])
+    .filter((placement) => placement.workpiece.equals(entry._id))
+    .map((placement) => ({ kind: 'room' as const, id: placement.room }));
+  const source = await sourceOfOwnFork(archive, entry._id, actor.actorId);
+  const parents: Reference[] = [
+    ...rooms,
+    ...(source === undefined ? [] : [{ kind: 'workpiece' as const, id: source }]),
+  ];
+
+  const itself: Reference = { kind: entry.kind, id: entry._id };
+  const places = new Map([[`${itself.kind}:${itself.id.toHexString()}`, itself]]);
+  await Promise.all(parents.map((place) => collectPlaces(db, place, places, actor.actorId)));
+  return rightsHeld(db, groups, [...places.values()]);
+}
+
 /** Whether the actor may hand these rights on at the place: manage there and each of them held. */
 export async function mayHandOn(
   db: Db,
@@ -80,9 +113,14 @@ export async function mayAddMember(db: Db, actor: Actor, groupId: ObjectId): Pro
     return false;
   }
 
+  // A grant at something archived opens nothing, so handing it on asks for nothing.
   const grants = await grantsOf(db, groupId);
   const allowed = await Promise.all(
-    grants.map((grant) => mayHandOn(db, actor, grant.scope, grant.rights)),
+    grants.map(
+      async (grant) =>
+        (grant.scope !== undefined && !(await placeExists(db, grant.scope))) ||
+        mayHandOn(db, actor, grant.scope, grant.rights),
+    ),
   );
   return allowed.every(Boolean);
 }

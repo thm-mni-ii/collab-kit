@@ -342,42 +342,6 @@ describe('listing, renaming and deleting groups', () => {
     const empty = await request(server).patch(`/groups/${team}`).set(as(bob)).send({});
     expect(empty.status).toBe(400);
   });
-
-  it('deletes a group with manage at it: its grants go, and those held at it', async () => {
-    const { roomId, team, at } = await course();
-    await grant(team, at, ['see']);
-    await grant(team, undefined, ['speak']);
-    const leads = await group(['bob']);
-    await grant(leads, { kind: 'group', id: team }, ['see', 'manage']);
-    const remove = (token: string) =>
-      request(server).delete(`/groups/${team}?reason=aufgeloest`).set(as(token));
-
-    expect((await remove(tutor)).status).toBe(404);
-    expect((await remove(alice)).status).toBe(403);
-    const removed = await remove(bob);
-    expect(removed.status).toBe(200);
-    expect(removed.body).toEqual({ deleted: true });
-    expect((await request(server).get(`/groups/${team}`).set(as(dozent))).status).toBe(404);
-
-    const id = new ObjectId(team);
-    const grants = storage.db.collection('grants');
-    expect(await grants.countDocuments({ $or: [{ groupId: id }, { 'scope.id': id }] })).toBe(0);
-    expect((await request(server).get(`/rooms/${roomId}`).set(as(alice))).status).toBe(404);
-
-    // The room tells that the group lost its rights there; the rest is at the group.
-    const atRoom = (await tracesAt(roomId)).filter((event) => event.kind === 'grant-removed');
-    expect(atRoom).toHaveLength(1);
-    expect(atRoom[0]).toMatchObject({ createdBy: 'bob', reason: 'aufgeloest' });
-    expect(String(atRoom[0]?.detail?.['groupId'])).toBe(team);
-    const atGroup = await tracesAt(team);
-    expect(atGroup.filter((event) => event.kind === 'grant-removed')).toHaveLength(2);
-    expect(atGroup.at(-1)).toMatchObject({
-      kind: 'group-deleted',
-      createdBy: 'bob',
-      detail: { name: 'Gruppe' },
-      reason: 'aufgeloest',
-    });
-  });
 });
 
 describe('names to actor keys', () => {
@@ -548,42 +512,6 @@ describe('renaming and deleting rooms', () => {
     expect((await change({})).status).toBe(400);
     expect((await change({ name: '  ' })).status).toBe(400);
     expect((await change({ name: 7, settings: {} })).status).toBe(400);
-  });
-
-  it('deletes a room with manage there: its grants go, its workpieces stay', async () => {
-    const { roomId, workpieceId, team, tutors, at } = await course();
-    await grant(team, at, ['see']);
-    const remove = (token: string) =>
-      request(server).delete(`/rooms/${roomId}?reason=aufgeraeumt`).set(as(token));
-
-    expect((await remove(bob)).status).toBe(404);
-    expect((await remove(alice)).status).toBe(403);
-    const removed = await remove(tutor);
-    expect(removed.status).toBe(200);
-    expect(removed.body).toEqual({ deleted: true });
-    expect((await remove(tutor)).status).toBe(404);
-
-    const grants = storage.db.collection('grants');
-    expect(await grants.countDocuments({ 'scope.id': new ObjectId(roomId) })).toBe(0);
-    // The workpiece lives on; alice saw it only through the room, the dozent sees it from above.
-    const show = (token: string) =>
-      request(server).get(`/workpieces/${workpieceId}`).set(as(token));
-    expect((await show(dozent)).status).toBe(200);
-    expect((await show(alice)).status).toBe(404);
-
-    // A trace for each grant that went, then one for the room, all with the why.
-    const traces = await tracesAt(roomId);
-    const gone = traces.filter((event) => event.kind === 'grant-removed');
-    expect(gone.map((event) => String(event.detail?.['groupId'])).toSorted()).toEqual(
-      [team, tutors].toSorted(),
-    );
-    expect(gone.every((event) => event.reason === 'aufgeraeumt')).toBe(true);
-    expect(traces.at(-1)).toMatchObject({
-      kind: 'room-deleted',
-      createdBy: 'tutor',
-      detail: { name: 'Übung' },
-      reason: 'aufgeraeumt',
-    });
   });
 });
 

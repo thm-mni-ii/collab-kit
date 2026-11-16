@@ -47,6 +47,10 @@ describe('connect', () => {
     await expect(storage.db.command({ ping: 1 })).resolves.toMatchObject({ ok: 1 });
   });
 
+  it('opens the archive next to the database', () => {
+    expect(storage.archive.databaseName).toBe(`${database}_archive`);
+  });
+
   it('fails fast on an address nobody answers', async () => {
     await expect(
       connect({
@@ -83,6 +87,18 @@ describe('applyDefinitions', () => {
     ]);
 
     await expect(storage.db.collection('lenient').insertOne({ label: 42 })).resolves.toBeTruthy();
+  });
+
+  it('packs the collection with the compressor it names', async () => {
+    await applyDefinitions(storage.db, [{ ...probe, name: 'packed', compressor: 'zstd' }]);
+
+    const [stats] = await storage.db
+      .collection('packed')
+      .aggregate<{ storageStats: { wiredTiger: { creationString: string } } }>([
+        { $collStats: { storageStats: {} } },
+      ])
+      .toArray();
+    expect(stats?.storageStats.wiredTiger.creationString).toContain('block_compressor=zstd');
   });
 
   it('can run again and then carries the changed schema', async () => {

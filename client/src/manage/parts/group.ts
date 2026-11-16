@@ -124,7 +124,7 @@ export class CkGroupDetail extends LitElement {
         .name=${group.name}
         .manages=${this.manages}
         .nameLabel=${t.groupName}
-        .question=${t.removeGroup}
+        .question=${t.archiveGroup}
         .form=${form}
         .busy=${this.busy}
       ></ck-head>

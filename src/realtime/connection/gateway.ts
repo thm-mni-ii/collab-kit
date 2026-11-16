@@ -11,7 +11,12 @@ import { seesThroughEverywhere, writesAs } from '../../auth/anonymity.ts';
 import { asObjectId } from '../../utils/input.ts';
 import { defined } from '../../utils/optional.ts';
 import { isAllowedOrigin } from '../../utils/origin.ts';
-import type { Connection, WorkpieceHub, OpenWorkpiece } from '../hub/types.ts';
+import {
+  WorkpieceWithheld,
+  type Connection,
+  type WorkpieceHub,
+  type OpenWorkpiece,
+} from '../hub/types.ts';
 import { encodeSyncStep1, handleMessage, MessageRefused, tokenIn } from './protocol.ts';
 
 /** The client announces two subprotocols: this marker and the token itself. */
@@ -346,6 +351,11 @@ async function serveConnection(
   try {
     workpiece = await options.hub.join(admitted.workpieceId, connection);
   } catch (error) {
+    // Being archived: final, so the client does not try again.
+    if (error instanceof WorkpieceWithheld) {
+      ws.close(4403, 'workpiece archived');
+      return;
+    }
     log.error({ err: error }, 'could not open the workpiece');
     ws.close(1011, 'workpiece could not be opened');
     return;

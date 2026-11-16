@@ -16,7 +16,14 @@ import {
   storeUpdate,
   type Stored,
 } from './persistence.ts';
-import type { Connection, HubOptions, Merge, OpenWorkpiece, WorkpieceHub } from './types.ts';
+import {
+  WorkpieceWithheld,
+  type Connection,
+  type HubOptions,
+  type Merge,
+  type OpenWorkpiece,
+  type WorkpieceHub,
+} from './types.ts';
 import {
   encodeAwareness,
   encodeEvent,
@@ -92,6 +99,8 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
   // Leaves still being written and merges still running; close waits for them, so everyone
   // connected gets a left and no merge goes on in a released Y.Doc.
   const running = new Set<Promise<unknown>>();
+  // Workpieces being moved out of the database; nobody joins or merges into them meanwhile.
+  const withheld = new Set<string>();
 
   /** Loads the workpiece and wires its Y.Doc and awareness to this hub. */
   async function load(
@@ -393,6 +402,9 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
   /** Holds the workpiece without presence, replays, tells what it found, and lets go if alone. */
   async function mergeNow(workpieceId: ObjectId, input: Merge): Promise<EventRecord> {
     const key = workpieceId.toHexString();
+    if (withheld.has(key)) {
+      throw new WorkpieceWithheld(workpieceId);
+    }
     const held = hold(workpieceId);
 
     // Counted before awaiting, as a joining connection is, so the last one leaving meanwhile
@@ -464,6 +476,62 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
     }
   }
 
+  /** Closes every connection to the workpiece; each leaves as on its own, and the hub lets go of it. */
+  async function closeAll(workpieceId: ObjectId): Promise<void> {
+    const key = workpieceId.toHexString();
+    const held = heldByKey.get(key);
+    if (held === undefined) {
+      return;
+    }
+
+    // A load that failed holds nothing to close.
+    let loaded: Loaded;
+    try {
+      loaded = await held.loaded;
+    } catch {
+      return;
+    }
+
+    // 4403 is final for the client, so it does not try again.
+    const connections = [...loaded.workpiece.connections];
+    for (const connection of connections) {
+      connection.close(4403, 'workpiece archived');
+    }
+    await Promise.all(connections.map((connection) => tracked(leaveNow(workpieceId, connection))));
+
+    // Nobody left to let go of it, as when a join was turned away while it loaded.
+    if (heldByKey.get(key) === held && loaded.workpiece.connections.size === 0) {
+      await tracked(release(key, loaded));
+    }
+  }
+
+  /** Keeps joins and merges out, closes every connection, waits for what runs, then does the work. */
+  async function withholdNow<T>(
+    workpieceIds: readonly ObjectId[],
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const keys = workpieceIds.map((id) => id.toHexString());
+    // A second one at the same time would move what the first is moving.
+    const busy = workpieceIds.find((id) => withheld.has(id.toHexString()));
+    if (busy !== undefined) {
+      throw new WorkpieceWithheld(busy);
+    }
+    for (const key of keys) {
+      withheld.add(key);
+    }
+
+    try {
+      await Promise.all(workpieceIds.map((id) => closeAll(id)));
+      // Merges, snapshots and leaves still on their way end before anything moves.
+      await Promise.allSettled(running);
+      return await work();
+    } finally {
+      for (const key of keys) {
+        withheld.delete(key);
+      }
+    }
+  }
+
   /** Keeps work in running until it ends, so close can wait for it. */
   async function tracked<T>(work: Promise<T>): Promise<T> {
     running.add(work);
@@ -477,6 +545,9 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
   return {
     join: async (workpieceId, connection) => {
       const key = workpieceId.toHexString();
+      if (withheld.has(key)) {
+        throw new WorkpieceWithheld(workpieceId);
+      }
       const held = hold(workpieceId);
 
       // Added before awaiting, so the count is right the moment the caller asks.
@@ -484,13 +555,19 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
 
       try {
         const workpiece = (await held.loaded).workpiece;
-        await notePresence(workpieceId, 'joined', connection);
-        return workpiece;
+        if (!withheld.has(key)) {
+          await notePresence(workpieceId, 'joined', connection);
+          return workpiece;
+        }
       } catch (error) {
         // Loading failed: forget it, so the next join tries again.
         forget(key, held.connections);
         throw error;
       }
+
+      // Withheld while it loaded: out again before anyone hears it joined; withhold lets go of it.
+      held.connections.delete(connection);
+      throw new WorkpieceWithheld(workpieceId);
     },
 
     leave: (workpieceId, connection) => tracked(leaveNow(workpieceId, connection)),
@@ -509,6 +586,8 @@ export function createWorkpieceHub(options: HubOptions): WorkpieceHub {
     storedUpTo,
 
     merge: (workpieceId, input) => tracked(mergeNow(workpieceId, input)),
+
+    withhold: withholdNow,
 
     count: (workpieceId) => heldByKey.get(workpieceId.toHexString())?.connections.size ?? 0,
 

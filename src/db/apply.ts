@@ -4,6 +4,8 @@ import type { Db, Document, IndexDescription } from 'mongodb';
 export type ValidationLevel = 'off' | 'moderate' | 'strict';
 /** warn only writes to the server log, error refuses the write. */
 export type ValidationAction = 'warn' | 'error';
+/** How WiredTiger packs the data on disk. */
+export type Compressor = 'snappy' | 'zlib' | 'zstd';
 
 /** One collection of the service: its $jsonSchema plus its indexes, never a tool's structure. */
 export interface CollectionDefinition {
@@ -12,6 +14,8 @@ export interface CollectionDefinition {
   readonly indexes?: readonly IndexDescription[];
   readonly validationLevel?: ValidationLevel;
   readonly validationAction?: ValidationAction;
+  /** Only read when the collection is created; WiredTiger keeps it from then on. */
+  readonly compressor?: Compressor;
 }
 
 /** Creates missing collections and updates existing ones; safe to run on every startup. */
@@ -35,7 +39,16 @@ export async function applyDefinitions(
     if (present.has(definition.name)) {
       await db.command({ collMod: definition.name, ...options });
     } else {
-      await db.createCollection(definition.name, options);
+      // The compressor can only be chosen now, so it is left out of collMod above.
+      const packing =
+        definition.compressor === undefined
+          ? {}
+          : {
+              storageEngine: {
+                wiredTiger: { configString: `block_compressor=${definition.compressor}` },
+              },
+            };
+      await db.createCollection(definition.name, { ...options, ...packing });
     }
 
     const collection = db.collection(definition.name);
