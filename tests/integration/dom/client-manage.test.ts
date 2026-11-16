@@ -16,6 +16,7 @@ import { createCollabKitApi } from '../../../client/src/index.ts';
 import '../../../client/src/manage/index.ts';
 import { createTokenCheck } from '../../../src/auth/token.ts';
 import { applyDefinitions } from '../../../src/db/apply.ts';
+import { archiveDefinitions } from '../../../src/db/archive/definitions.ts';
 import { connect, type Storage } from '../../../src/db/client.ts';
 import { collectionDefinitions } from '../../../src/db/schemas.ts';
 import { attachGateway, createWorkpieceHub, type Gateway } from '../../../src/realtime/index.ts';
@@ -130,7 +131,7 @@ async function fill(element: Management, text: string): Promise<void> {
   await settled(element);
 }
 
-/** Picks the workpiece of this name in the list. */
+/** Picks the workpiece, or the entry of the archive, of this name in the list. */
 async function pickWorkpiece(element: Management, name: string): Promise<HTMLElement> {
   const item = (find(rootOf(element), '.item') as HTMLElement[]).find(
     (each) => each.querySelector('.name')?.textContent?.trim() === name,
@@ -184,6 +185,7 @@ async function toggle(element: Management, row: string, right: string): Promise<
 beforeAll(async () => {
   storage = await connect({ uri, database });
   await applyDefinitions(storage.db, collectionDefinitions);
+  await applyDefinitions(storage.archive, archiveDefinitions);
 
   const hub = createWorkpieceHub({ db: storage.db, logger: silent });
   const checkToken = createTokenCheck({
@@ -217,6 +219,7 @@ afterAll(async () => {
   await gateway.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await storage.db.dropDatabase();
+  await storage.archive.dropDatabase();
   await storage.close();
   await page.happyDOM.close();
 });
@@ -310,7 +313,8 @@ describe('<ck-management>', () => {
     const text = textOf(element);
     expect(text).toContain('Übung 4');
     expect(text).toContain('Entwurf');
-    for (const absent of ['Raum anlegen', 'Umbenennen', 'Löschen', 'Zugriff der Gruppen']) {
+    // Archiv covers both the button and the tab.
+    for (const absent of ['Raum anlegen', 'Umbenennen', 'Archiv', 'Zugriff der Gruppen']) {
       expect(text).not.toContain(absent);
     }
 
@@ -526,7 +530,7 @@ describe('<ck-management>', () => {
     element.append(content);
 
     const labels = find(rootOf(element), '.bar button').map((each) => each.textContent?.trim());
-    expect(labels).toEqual(['Räume', 'Gruppen', 'Werkstücke', 'Import']);
+    expect(labels).toEqual(['Räume', 'Gruppen', 'Werkstücke', 'Archiv', 'Import']);
 
     await click(element, 'Import');
     expect(button(element, 'Import').getAttribute('aria-selected')).toBe('true');
@@ -547,6 +551,86 @@ describe('<ck-management>', () => {
     await settled(element);
     expect(() => button(element, 'Import')).toThrow();
     expect(rootOf(element).querySelector('.body')).not.toBeNull();
+  });
+
+  it('shows only the own tabs the tool chose, in their order, and moves off one it takes away', async () => {
+    const element = await mount(alice, {
+      tabs: ['archive', 'groups'],
+      extraTabs: [{ id: 'import', label: 'Import' }],
+    });
+    const labels = () =>
+      find(rootOf(element), '.bar button').map((each) => each.textContent?.trim());
+    expect(labels()).toEqual(['Gruppen', 'Archiv', 'Import']);
+    expect(button(element, 'Gruppen').getAttribute('aria-selected')).toBe('true');
+
+    // The tool takes the open tab away: the first one left shows.
+    element.tabs = ['archive'];
+    await settled(element);
+    expect(labels()).toEqual(['Archiv', 'Import']);
+    expect(button(element, 'Archiv').getAttribute('aria-selected')).toBe('true');
+
+    // No own tab is left: the tab of the tool shows.
+    element.tabs = [];
+    await settled(element);
+    expect(labels()).toEqual(['Import']);
+    expect(rootOf(element).querySelector('.extra slot')?.getAttribute('name')).toBe('import');
+  });
+
+  it('leaves the archive out without manage everywhere, even when the tool chose it', async () => {
+    const element = await mount(bob, { tabs: ['groups', 'archive'] });
+    const labels = find(rootOf(element), '.bar button').map((each) => each.textContent?.trim());
+    expect(labels).toEqual(['Gruppen']);
+    expect(button(element, 'Gruppen').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('archives a room, a group and a workpiece once asked, and restores or deletes them', async () => {
+    const room = await alice.rooms.create({ name: 'Übung 13' });
+    const group = await alice.groups.create({ name: 'Team M' });
+    const workpiece = await alice.workpieces.create({ name: 'Altstück', roomId: room._id });
+    const archivedIds = async () => (await alice.archive.list()).map((entry) => entry._id);
+
+    // Each only once confirmed.
+    const element = await mount(alice);
+    await click(element, 'Übung 13');
+    await click(element, 'Archivieren');
+    expect(textOf(element)).toContain('Raum archivieren?');
+    expect(await archivedIds()).not.toContain(room._id);
+    await click(element, 'Ja, archivieren');
+    expect(textOf(element)).toContain('Archiviert.');
+    expect(textOf(element)).not.toContain('Übung 13');
+
+    await click(element, 'Gruppen');
+    await click(element, 'Team M');
+    await click(element, 'Archivieren');
+    await click(element, 'Ja, archivieren');
+
+    await click(element, 'Werkstücke');
+    await pickWorkpiece(element, 'Altstück');
+    expect(() => button(element, 'Umbenennen')).toThrow();
+    await click(element, 'Archivieren');
+    expect(textOf(element)).toContain('Seine Abzweige gehen mit');
+    await click(element, 'Ja, archivieren');
+    expect(await archivedIds()).toEqual(
+      expect.arrayContaining([room._id, group._id, workpiece._id]),
+    );
+
+    // The room comes back into its tab, the workpiece stays in the archive meanwhile.
+    await click(element, 'Archiv');
+    await pickWorkpiece(element, 'Übung 13');
+    expect(textOf(element)).toContain('Raum · archiviert am');
+    await click(element, 'Zurückholen');
+    expect(textOf(element)).toContain('Zurückgeholt.');
+    expect((await alice.rooms.get(room._id)).name).toBe('Übung 13');
+    expect(textOf(element)).toContain('Altstück');
+
+    // Gone for good only once asked again.
+    await pickWorkpiece(element, 'Team M');
+    await click(element, 'Endgültig löschen');
+    expect(textOf(element)).toContain('Das lässt sich nicht rückgängig machen.');
+    await click(element, 'Ja, endgültig löschen');
+    expect(textOf(element)).toContain('Endgültig gelöscht.');
+    expect(await archivedIds()).not.toContain(group._id);
+    expect(textOf(element)).not.toContain('Team M');
   });
 
   it('shows on reload a room the tool created elsewhere', async () => {

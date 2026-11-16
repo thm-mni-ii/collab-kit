@@ -110,6 +110,13 @@ export const SERVICE_KINDS: ReadonlySet<string> = new Set([
   'work-lost',
   'workpiece-forked',
   'workpiece-merged',
+  'workpiece-archived',
+  'workpiece-restored',
+  'workpiece-deleted',
+  'room-archived',
+  'room-restored',
+  'group-archived',
+  'group-restored',
 ]);
 
 /** What a merge found, written under authors who were not there: no sign of their activity. */
@@ -409,7 +416,10 @@ export async function writeReturningEvents(
 }
 
 /** Runs the work in one transaction and closes the session afterwards, even after an error. */
-async function inTransaction<T>(db: Db, work: (session: ClientSession) => Promise<T>): Promise<T> {
+export async function inTransaction<T>(
+  db: Db,
+  work: (session: ClientSession) => Promise<T>,
+): Promise<T> {
   const session = db.client.startSession();
 
   try {

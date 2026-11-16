@@ -2,8 +2,7 @@ import { ObjectId, type Db, type Document } from 'mongodb';
 
 import { defined } from '../../utils/optional.ts';
 import type { CollectionDefinition } from '../apply.ts';
-import { writeReturningEvents, writeWithEvents, type NewEvent } from './events.ts';
-import { removeGrantsOfGroup } from './grants.ts';
+import { writeWithEvents, type NewEvent } from './events.ts';
 
 /** A set of actors, nothing more; what it stands for, a role say, is the business of the tool. */
 export interface GroupRecord {
@@ -197,40 +196,6 @@ export async function renameGroup(
       return result.modifiedCount === 1;
     },
     [groupEvent('group-renamed', groupId, input.renamedBy, { to: input.name }, input.reason)],
-    now,
-  );
-}
-
-export interface GroupDeletion {
-  readonly deletedBy: string;
-  readonly reason?: string;
-}
-
-/** Deletes the group with its grants and those held at it; a task given to it keeps the entry. */
-export async function deleteGroup(
-  db: Db,
-  groupId: ObjectId,
-  input: GroupDeletion,
-  now = new Date(),
-): Promise<boolean> {
-  return writeReturningEvents(
-    db,
-    async (session) => {
-      const group = await db
-        .collection<GroupRecord>('groups')
-        .findOneAndDelete({ _id: groupId }, { session });
-      if (group === null) {
-        return [];
-      }
-
-      // What it held goes with it, and rights at it would hold at nothing.
-      const removal = { removedBy: input.deletedBy, ...defined({ reason: input.reason }) };
-      const removed = await removeGrantsOfGroup(db, groupId, removal, session);
-      return [
-        ...removed,
-        groupEvent('group-deleted', groupId, input.deletedBy, { name: group.name }, input.reason),
-      ];
-    },
     now,
   );
 }

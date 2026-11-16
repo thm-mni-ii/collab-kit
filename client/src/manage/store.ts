@@ -5,9 +5,11 @@ import type { ReactiveControllerHost } from 'lit';
 import type {
   Activity,
   ActorName,
+  ArchiveEntry,
   Grant,
   Group,
   ManagementOptions,
+  ManagementOwnTab,
   Named,
   Reference,
   Right,
@@ -22,11 +24,17 @@ export const RIGHTS: readonly Right[] = ['see', 'speak', 'edit', 'plan', 'decide
 /** What one chip of a grant switches: a right, or whether its members write anonymously. */
 export type Switch = Right | 'anonymous';
 
-/** Which list is shown; workpieces only with manage everywhere. */
-export type Tab = 'rooms' | 'groups' | 'workpieces';
+/** Which list is shown; workpieces and archive only with manage everywhere. */
+export type Tab = ManagementOwnTab;
 
-/** What the one open form is for. */
-export type FormKind = 'room' | 'group' | 'workpiece' | 'member' | 'rename' | 'remove';
+/** Every own tab, in the order the bar shows them. */
+const TABS: readonly Tab[] = ['rooms', 'groups', 'workpieces', 'archive'];
+
+/** The tabs that take manage everywhere. */
+const TOP_TABS: ReadonlySet<Tab> = new Set(['workpieces', 'archive']);
+
+/** What the one open form is for; archive and delete only ask before it happens. */
+export type FormKind = 'room' | 'group' | 'workpiece' | 'member' | 'rename' | 'archive' | 'delete';
 
 /** The one form open at a time, with what went wrong or whom findPeople found. */
 export interface Form {
@@ -65,6 +73,8 @@ export interface State {
   readonly rooms: readonly Named<Room>[];
   readonly groups: readonly Named<Group>[];
   readonly workpieces: ReadonlyMap<string, Workpiece>;
+  /** What is in the archive, newest first, as far as the person saw it live. */
+  readonly archived: readonly ArchiveEntry[];
   /** Names to the keys of people, as CK or findPeople gave them. */
   readonly names: Readonly<Record<string, string>>;
   /** Whether the person holds manage everywhere, which creating a room or a group takes. */
@@ -88,9 +98,10 @@ const EMPTY: State = {
   rooms: [],
   groups: [],
   workpieces: new Map(),
+  archived: [],
   names: {},
   mayCreate: false,
-  selected: { rooms: undefined, groups: undefined, workpieces: undefined },
+  selected: { rooms: undefined, groups: undefined, workpieces: undefined, archive: undefined },
   detail: undefined,
   use: undefined,
   form: undefined,
@@ -140,29 +151,61 @@ export class Store {
     }
 
     await this.run(async () => {
-      const [everywhere, rooms, groups, workpieces] = await Promise.all([
+      const [everywhere, rooms, groups, workpieces, archived] = await Promise.all([
         ck.me.rights(),
         ck.me.rooms(),
         ck.groups.list(),
         ck.workpieces.list(),
+        ck.archive.list(),
       ]);
       // Another ck came meanwhile and loads its own.
       if (ck !== this.host.ck) {
         return;
       }
-      const mayCreate = everywhere.includes('manage');
       this.set({
-        mayCreate,
-        // Another person may lack manage everywhere, which the workpieces take.
-        tab: mayCreate || this.state.tab !== 'workpieces' ? this.state.tab : 'rooms',
+        mayCreate: everywhere.includes('manage'),
         rooms: byName(rooms),
         groups: byName(groups),
         workpieces: new Map(workpieces.map((workpiece) => [workpiece._id, workpiece])),
+        archived,
         loaded: true,
       });
+      // The tool, or another person lacking manage everywhere, may leave the current tab out.
+      const shown = this.shownTabs();
+      this.set({ tab: shown.includes(this.state.tab) ? this.state.tab : (shown[0] ?? 'rooms') });
       this.takeNames(...groups);
       await this.select(this.keptOrFirst(this.state.tab));
+      await this.fit();
     });
+  }
+
+  /** The own tabs in the bar: those the tool chose, workpieces and archive only with manage everywhere. */
+  shownTabs(): Tab[] {
+    const chosen = this.host.tabs ?? TABS;
+    return TABS.filter(
+      (tab) => chosen.includes(tab) && (this.state.mayCreate || !TOP_TABS.has(tab)),
+    );
+  }
+
+  /** Moves off an own tab no longer shown: to the first one left, else to the first tab of the tool. */
+  async fit(): Promise<void> {
+    if (!this.state.loaded || this.state.extra !== undefined) {
+      return;
+    }
+    const shown = this.shownTabs();
+    if (shown.includes(this.state.tab)) {
+      return;
+    }
+    const [first] = shown;
+    if (first !== undefined) {
+      await this.show(first);
+      return;
+    }
+    // No own tab is left, so a tab of the tool shows if there is one.
+    const [extra] = this.host.extraTabs ?? [];
+    if (extra !== undefined) {
+      this.showExtra(extra.id);
+    }
   }
 
   async show(tab: Tab): Promise<void> {
@@ -196,6 +239,10 @@ export class Store {
   workpiece(): Workpiece | undefined {
     const id = this.state.selected.workpieces;
     return id === undefined ? undefined : this.state.workpieces.get(id);
+  }
+
+  archiveEntry(): ArchiveEntry | undefined {
+    return this.state.archived.find((entry) => entry._id === this.state.selected.archive);
   }
 
   /** Every workpiece by name, each fork under its source where the source is known. */
@@ -361,23 +408,57 @@ export class Store {
     });
   }
 
-  /** Deletes the shown room or group, once asked again, and shows the next one. */
-  async removePlace(): Promise<void> {
-    const place = this.place();
-    if (place === undefined) {
+  /** Moves the shown room, group or workpiece into the archive, once asked again. */
+  async archive(): Promise<void> {
+    const { tab, selected } = this.state;
+    const id = selected[tab];
+    if (id === undefined || tab === 'archive') {
       return;
     }
 
     await this.run(async () => {
-      if (place.kind === 'room') {
-        await this.ck().rooms.remove(place.id);
-        this.set({ rooms: this.state.rooms.filter((room) => room._id !== place.id) });
-      } else {
-        await this.ck().groups.remove(place.id);
-        this.set({ groups: this.state.groups.filter((group) => group._id !== place.id) });
-      }
+      const ck = this.ck();
+      await (tab === 'rooms'
+        ? ck.rooms.archive(id)
+        : tab === 'groups'
+          ? ck.groups.archive(id)
+          : ck.workpieces.archive(id));
+      // Rooms, forks and the archive changed with it, so everything is asked for anew.
       this.set({ form: undefined });
-      await this.select(this.keptOrFirst(this.state.tab));
+      await this.load();
+      this.set({ saved: this.words().savedArchived });
+    });
+  }
+
+  /** Brings the shown entry of the archive back, where it was before. */
+  async restore(): Promise<void> {
+    const id = this.state.selected.archive;
+    if (id === undefined) {
+      return;
+    }
+
+    await this.run(async () => {
+      await this.ck().archive.restore(id);
+      await this.load();
+      this.set({ saved: this.words().savedRestored });
+    });
+  }
+
+  /** Deletes the shown entry of the archive for good, once asked again, and shows the next one. */
+  async deleteForGood(): Promise<void> {
+    const id = this.state.selected.archive;
+    if (id === undefined) {
+      return;
+    }
+
+    await this.run(async () => {
+      await this.ck().archive.remove(id);
+      this.set({
+        archived: this.state.archived.filter((entry) => entry._id !== id),
+        form: undefined,
+      });
+      await this.select(this.keptOrFirst('archive'));
+      this.set({ saved: this.words().savedDeleted });
     });
   }
 
@@ -451,7 +532,8 @@ export class Store {
         }
         return;
       }
-      case 'remove':
+      case 'archive':
+      case 'delete':
         return;
     }
   }
@@ -530,11 +612,11 @@ export class Store {
     this.set({ form: undefined });
   }
 
-  /** The shown room or group; a workpiece is no place that is renamed or deleted here. */
+  /** The shown room or group; a workpiece or an entry of the archive is no place renamed here. */
   private place(): Reference | undefined {
     const { tab, selected } = this.state;
     const id = selected[tab];
-    return id === undefined || tab === 'workpieces'
+    return id === undefined || TOP_TABS.has(tab)
       ? undefined
       : { kind: tab === 'rooms' ? 'room' : 'group', id };
   }
@@ -545,7 +627,9 @@ export class Store {
         ? this.state.rooms
         : tab === 'groups'
           ? this.state.groups
-          : this.entries().map((entry) => entry.workpiece);
+          : tab === 'archive'
+            ? this.state.archived
+            : this.entries().map((entry) => entry.workpiece);
     const kept = this.state.selected[tab];
     return items.some((item) => item._id === kept) ? kept : items[0]?._id;
   }

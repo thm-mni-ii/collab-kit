@@ -24,11 +24,13 @@ export interface CollabKitApi {
   readonly groups: GroupRoutes;
   readonly grants: GrantRoutes;
   readonly workpieces: WorkpieceRoutes;
+  readonly archive: ArchiveRoutes;
   readonly comments: CommentRoutes;
   readonly tasks: TaskRoutes;
   readonly events: EventRoutes;
   readonly actors: ActorRoutes;
   readonly me: MeRoutes;
+  readonly settings: SettingsRoutes;
 }
 
 /** A refusal of CK, or of the library in its place: a status and what CK said. */
@@ -90,6 +92,8 @@ export interface SessionEvents<Value = unknown> {
   readonly rightsChanged: boolean;
   /** Writes anonymously now or not, when CK answers otherwise; clientId and awareness are new. */
   readonly anonymityChanged: boolean;
+  /** An area of settings changed or went; the name only, the values are read anew. */
+  readonly settingsChanged: string;
   /** CK ended the session; it stays closed until connect is called. */
   readonly closed: Closed;
   /** A change lost at this workpiece, to whoever was involved and whoever was not. */
@@ -342,6 +346,22 @@ export interface UnitsAt<Value = unknown> {
   readonly upToUpdateId?: string;
 }
 
+/** What can go into the archive. */
+export type ArchiveKind = 'workpiece' | 'room' | 'group';
+
+/** A thing in the archive; restored, it is back under the same key. */
+export interface ArchiveEntry {
+  readonly _id: string;
+  readonly kind: ArchiveKind;
+  readonly name: string;
+  readonly archivedAt: string;
+  readonly reason?: string;
+  /** Only at a workpiece: the rooms it and its forks stood in. */
+  readonly rooms?: readonly { readonly workpiece: string; readonly room: string }[];
+  /** Only at a workpiece: its forks at any depth, archived with it. */
+  readonly forks?: readonly string[];
+}
+
 /** The newest trace of one person. */
 export interface Activity {
   readonly actorId: string;
@@ -439,7 +459,8 @@ export interface RoomRoutes {
   create(room: NewRoom): Promise<Named<Room>>;
   get(id: string): Promise<Named<Room>>;
   update(id: string, change: PlaceChange): Promise<Named<Room>>;
-  remove(id: string, options?: Reasoned): Promise<{ readonly deleted: boolean }>;
+  /** Into the archive with all that hangs on it; its workpieces stay. Takes manage at it. */
+  archive(id: string, options?: Reasoned): Promise<ArchiveEntry>;
   addWorkpiece(id: string, workpieceId: string): Promise<Named<Room>>;
   removeWorkpiece(id: string, workpieceId: string): Promise<Named<Room>>;
   events(id: string, query?: RoomEventQuery): Promise<Named<CollabEvent>[]>;
@@ -461,7 +482,8 @@ export interface GroupRoutes {
   list(): Promise<Named<Group>[]>;
   get(id: string): Promise<Named<Group>>;
   update(id: string, change: PlaceChange): Promise<Named<Group>>;
-  remove(id: string, options?: Reasoned): Promise<{ readonly deleted: boolean }>;
+  /** Into the archive with its members; its grants open nothing meanwhile. Takes manage at it. */
+  archive(id: string, options?: Reasoned): Promise<ArchiveEntry>;
   addMember(id: string, actorId: string): Promise<Named<Group>>;
   removeMember(id: string, actorId: string): Promise<Named<Group>>;
 }
@@ -544,6 +566,23 @@ export interface WorkpieceRoutes {
   checkpoint(id: string, checkpoint?: NewCheckpoint): Promise<Named<CollabEvent>>;
   fork(id: string, fork: NewFork): Promise<Named<Workpiece>>;
   merge(id: string, merge: NewMerge): Promise<Named<CollabEvent>>;
+  /** Into the archive with its forks and all that hangs on them; open sessions end with 4403. */
+  archive(id: string, options?: Reasoned): Promise<ArchiveEntry>;
+}
+
+/** Entries of one kind, or of all. */
+export interface ArchiveQuery {
+  readonly kind?: ArchiveKind;
+}
+
+/** The routes under /archive: what was archived, bringing it back, deleting it for good. */
+export interface ArchiveRoutes {
+  /** The entries the token saw while they were live, newest first. */
+  list(query?: ArchiveQuery): Promise<ArchiveEntry[]>;
+  /** Brings it back unchanged under its keys; takes manage at it, as archiving did. */
+  restore(id: string): Promise<{ readonly restored: true }>;
+  /** Deletes it with all it holds, and every grant at it; takes manage everywhere. */
+  remove(id: string, options?: Reasoned): Promise<{ readonly deleted: true }>;
 }
 
 /** A comment on a thing, or an answer to another comment on the same thing. */
@@ -654,6 +693,18 @@ export interface ActorRoutes {
   names(actorIds: readonly string[]): Promise<ActorName[]>;
 }
 
+/** Settings of the tool by area, valid for the whole instance; CK never reads the values. */
+export interface SettingsRoutes {
+  /** The names of every stored area. */
+  list(): Promise<string[]>;
+  /** The values of an area; one never set reads as {}. */
+  get(key: string): Promise<Record<string, unknown>>;
+  /** Replaces the values of an area as a whole; needs manage without a place. */
+  set(key: string, values: Record<string, unknown>): Promise<Record<string, unknown>>;
+  /** Removes an area, so the tool falls back on its defaults; needs manage without a place. */
+  remove(key: string): Promise<void>;
+}
+
 /** Tasks given to the own person or one of its groups. */
 export interface MyTaskQuery {
   readonly state?: string;
@@ -693,9 +744,14 @@ export interface ManagementOptions {
   newWorkpiece: ((room: Room, name: string) => NewWorkpiece | Promise<NewWorkpiece>) | undefined;
   /** People the tool knows for what was typed in; left out, a member is added by its key. */
   findPeople: ((text: string) => Promise<readonly ActorName[]>) | undefined;
+  /** The own tabs to show, in their fixed order; left out, all; workpieces and archive still take manage everywhere. */
+  tabs: readonly ManagementOwnTab[] | undefined;
   /** Tabs of the tool after the own ones, each showing the slot of its id; left out, none. */
   extraTabs: readonly ManagementTab[] | undefined;
 }
+
+/** An own tab of <ck-management>. */
+export type ManagementOwnTab = 'rooms' | 'groups' | 'workpieces' | 'archive';
 
 /** A tab of the tool: its button reads label, and it shows <slot name=id> over the full width. */
 export interface ManagementTab {

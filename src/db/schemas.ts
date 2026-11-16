@@ -7,6 +7,7 @@ import { grantsDefinition } from './collections/grants.ts';
 import { groupsDefinition } from './collections/groups.ts';
 import { pseudonymsDefinition } from './collections/pseudonyms.ts';
 import { roomsDefinition } from './collections/rooms.ts';
+import { settingsDefinition } from './collections/settings.ts';
 import { snapshotsDefinition } from './collections/snapshots.ts';
 import { tasksDefinition } from './collections/tasks.ts';
 import { updatesDefinition } from './collections/updates.ts';
@@ -26,6 +27,7 @@ export const collectionDefinitions: readonly CollectionDefinition[] = [
   groupsDefinition,
   pseudonymsDefinition,
   roomsDefinition,
+  settingsDefinition,
   snapshotsDefinition,
   tasksDefinition,
   updatesDefinition,

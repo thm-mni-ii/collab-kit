@@ -9,7 +9,9 @@ export interface PartEvents {
   'ck-form-close': undefined;
   'ck-form-input': undefined;
   'ck-form-submit': { readonly kind: FormKind; readonly text: string; readonly choice?: string };
-  'ck-remove': undefined;
+  'ck-archive': undefined;
+  'ck-restore': undefined;
+  'ck-delete': undefined;
   'ck-grant-toggle': { readonly grant: Grant; readonly chip: Switch };
   'ck-grant-give': { readonly groupId: string };
   'ck-grant-give-everywhere': undefined;

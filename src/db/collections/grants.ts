@@ -122,29 +122,8 @@ export async function removeGrant(db: Db, input: GrantRemoval, now = new Date())
   );
 }
 
-/** Takes every grant at the place away, in the caller's transaction; answers with their traces. */
-export async function removeGrantsAt(
-  db: Db,
-  scope: Reference,
-  removal: Pick<GrantRemoval, 'removedBy' | 'reason'>,
-  session: ClientSession,
-): Promise<NewEvent[]> {
-  return removeGrantsWhere(db, atPlace(scope), removal, session);
-}
-
-/** Takes away every grant the group holds and every grant held at it, as removeGrantsAt does. */
-export async function removeGrantsOfGroup(
-  db: Db,
-  groupId: ObjectId,
-  removal: Pick<GrantRemoval, 'removedBy' | 'reason'>,
-  session: ClientSession,
-): Promise<NewEvent[]> {
-  const filter = { $or: [{ groupId }, atPlace({ kind: 'group', id: groupId })] };
-  return removeGrantsWhere(db, filter as Filter<GrantRecord>, removal, session);
-}
-
-/** Takes away every grant the filter finds and answers with a trace for each. */
-async function removeGrantsWhere(
+/** Takes away every grant the filter finds, in the caller's transaction; a trace for each. */
+export async function removeGrantsWhere(
   db: Db,
   filter: Filter<GrantRecord>,
   removal: Pick<GrantRemoval, 'removedBy' | 'reason'>,

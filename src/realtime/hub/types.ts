@@ -64,6 +64,14 @@ export interface Merge {
   readonly reason?: string;
 }
 
+/** Refused while a workpiece is withheld, as when it is being moved into the archive. */
+export class WorkpieceWithheld extends Error {
+  constructor(workpieceId: ObjectId) {
+    super(`workpiece ${workpieceId.toHexString()} is withheld`);
+    this.name = 'WorkpieceWithheld';
+  }
+}
+
 /** What the gateway and the routes may ask of the hub. */
 export interface WorkpieceHub {
   /** Adds a connection, loading the workpiece if it is the first. */
@@ -80,6 +88,10 @@ export interface WorkpieceHub {
   count(workpieceId: ObjectId): number;
   /** Who is connected to this workpiece right now, one entry per person, by actorId. */
   presentAt(workpieceId: ObjectId): PresentActor[];
+  /** Closes every connection to these workpieces and keeps joins and merges out while work runs. */
+  withhold<T>(workpieceIds: readonly ObjectId[], work: () => Promise<T>): Promise<T>;
+  /** Sends an event to every connection that asked for events, at every workpiece. */
+  broadcast(event: object): void;
   /** Lets go of every workpiece, for the shutdown. */
   close(): Promise<void>;
 }

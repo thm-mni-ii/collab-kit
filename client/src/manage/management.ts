@@ -13,6 +13,7 @@ import type {
 import { info, plus } from './look/icons.ts';
 import { textsFor, type Texts } from './look/texts.ts';
 import { base, frame, tokens } from './look/theme.ts';
+import { kindName } from './parts/archive.ts';
 import type { PartEvents } from './parts/events.ts';
 import { roomCount } from './parts/workpiece.ts';
 import { Store, type FormKind, type Tab } from './store.ts';
@@ -23,6 +24,7 @@ export class Management extends LitElement implements ManagementElement {
     ck: { attribute: false },
     newWorkpiece: { attribute: false },
     findPeople: { attribute: false },
+    tabs: { attribute: false },
     extraTabs: { attribute: false },
     language: { attribute: 'lang' },
     infoOpen: { state: true },
@@ -33,6 +35,7 @@ export class Management extends LitElement implements ManagementElement {
   declare ck: CollabKitApi | undefined;
   declare newWorkpiece: ManagementOptions['newWorkpiece'];
   declare findPeople: ManagementOptions['findPeople'];
+  declare tabs: ManagementOptions['tabs'];
   declare extraTabs: ManagementOptions['extraTabs'];
   /** The lang attribute; left out, the one of the page counts. */
   declare language: string | undefined;
@@ -53,7 +56,9 @@ export class Management extends LitElement implements ManagementElement {
       'ck-form-submit',
       ({ kind, text, choice }) => void this.store.submit(kind, text, choice),
     );
-    this.listen('ck-remove', () => void this.store.removePlace());
+    this.listen('ck-archive', () => void this.store.archive());
+    this.listen('ck-restore', () => void this.store.restore());
+    this.listen('ck-delete', () => void this.store.deleteForGood());
     this.listen('ck-grant-toggle', ({ grant, chip }) => void this.store.toggle(grant, chip));
     this.listen('ck-grant-give', ({ groupId }) => {
       const room = this.store.room();
@@ -128,6 +133,10 @@ export class Management extends LitElement implements ManagementElement {
     if (extra !== undefined && !(this.extraTabs ?? []).some((each) => each.id === extra)) {
       this.store.showExtra(undefined);
     }
+    // An own tab the tool took away is no longer shown either.
+    if (changed.has('tabs') || changed.has('extraTabs')) {
+      void this.store.fit();
+    }
   }
 
   protected override updated(): void {
@@ -140,7 +149,14 @@ export class Management extends LitElement implements ManagementElement {
       return nothing;
     }
     const { t } = this;
-    const { tab, extra, failure, saved, mayCreate } = this.store.state;
+    const { tab, extra, failure, saved } = this.store.state;
+    const shown = this.store.shownTabs();
+    const labels: Record<Tab, string> = {
+      rooms: t.rooms,
+      groups: t.groups,
+      workpieces: t.workpieces,
+      archive: t.archiveTab,
+    };
 
     return html`<div class="frame">
       <div class="title">
@@ -157,30 +173,40 @@ export class Management extends LitElement implements ManagementElement {
       <p class="subtitle">${t.intro}</p>
       ${this.infoOpen ? this.infoView(t) : nothing}
       <div class="bar" role="tablist">
-        ${this.tabButton('rooms', t.rooms)} ${this.tabButton('groups', t.groups)}
-        ${mayCreate ? this.tabButton('workpieces', t.workpieces) : nothing}
+        ${shown.map((each) => this.tabButton(each, labels[each]))}
         ${(this.extraTabs ?? []).map((each) => this.extraButton(each.id, each.label))}
       </div>
       ${failure === undefined ? nothing : html`<p class="error banner" role="alert">${failure}</p>`}
       ${saved === undefined ? nothing : html`<p class="hint banner" role="status">${saved}</p>`}
       ${
-        extra === undefined
-          ? html`<div class="body">
-              <div class="list">
-                ${tab === 'workpieces' ? this.workpieceList(t) : this.listView(t)}
-              </div>
-              <div class="detail">
-                ${
-                  tab === 'rooms'
-                    ? this.roomDetail(t)
-                    : tab === 'groups'
-                      ? this.groupDetail(t)
-                      : this.workpieceDetail(t)
-                }
-              </div>
-            </div>`
-          : // What the tab shows the tool puts into its light DOM.
-            html`<div class="extra"><slot name=${extra}></slot></div>`
+        extra === undefined && !shown.includes(tab)
+          ? // Neither an own tab nor one of the tool is left to show.
+            nothing
+          : extra === undefined
+            ? html`<div class="body">
+                <div class="list">
+                  ${
+                    tab === 'workpieces'
+                      ? this.workpieceList(t)
+                      : tab === 'archive'
+                        ? this.archiveList(t)
+                        : this.listView(t)
+                  }
+                </div>
+                <div class="detail">
+                  ${
+                    tab === 'rooms'
+                      ? this.roomDetail(t)
+                      : tab === 'groups'
+                        ? this.groupDetail(t)
+                        : tab === 'archive'
+                          ? this.archiveDetail(t)
+                          : this.workpieceDetail(t)
+                  }
+                </div>
+              </div>`
+            : // What the tab shows the tool puts into its light DOM.
+              html`<div class="extra"><slot name=${extra}></slot></div>`
       }
     </div>`;
   }
@@ -195,6 +221,7 @@ export class Management extends LitElement implements ManagementElement {
       [t.glossEverywhere, t.glossEverywhereText],
       [t.glossPerson, t.glossPersonText],
       [t.glossCreate, t.glossCreateText],
+      [t.glossArchive, t.glossArchiveText],
     ];
 
     return html`<div class="more">
@@ -351,7 +378,52 @@ export class Management extends LitElement implements ManagementElement {
       .use=${store.state.use}
       .names=${store.state.names}
       .busy=${store.state.busy}
+      .form=${store.state.form}
     ></ck-workpiece-detail>`;
+  }
+
+  /** What was archived, newest first, each with its kind and when it went. */
+  private archiveList(t: Texts): TemplateResult {
+    const { loaded, archived, selected } = this.store.state;
+    const when = new Intl.DateTimeFormat(t.locale, { dateStyle: 'medium' });
+
+    return html`<div class="items">
+      ${
+        !loaded
+          ? html`<p class="empty">${t.loading}</p>`
+          : archived.length === 0
+            ? html`<p class="empty">${t.noArchived}</p>`
+            : archived.map(
+                (entry) =>
+                  html`<button
+                    class="item"
+                    aria-current=${entry._id === selected.archive}
+                    @click=${() => void this.store.select(entry._id)}
+                  >
+                    <span class="name">${entry.name}</span>
+                    <span class="sub"
+                      >${kindName(t, entry.kind)} · ${when.format(new Date(entry.archivedAt))}</span
+                    >
+                  </button>`,
+              )
+      }
+    </div>`;
+  }
+
+  private archiveDetail(t: Texts): TemplateResult | typeof nothing {
+    const { store } = this;
+    const entry = store.archiveEntry();
+    if (entry === undefined) {
+      return nothing;
+    }
+
+    return html`<ck-archive-detail
+      .t=${t}
+      .entry=${entry}
+      .rooms=${store.state.rooms}
+      .form=${store.state.form}
+      .busy=${store.state.busy}
+    ></ck-archive-detail>`;
   }
 
   private roomDetail(t: Texts): TemplateResult | typeof nothing {

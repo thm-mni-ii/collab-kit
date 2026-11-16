@@ -136,7 +136,16 @@ export function grantRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
     }
 
     const grants = groupId === undefined ? await grantsAt(db, scope) : await grantsOf(db, groupId);
-    response.json(await withNames(db, grants, readerOf(db, actorOf(request))));
+    // A grant whose group or place lies in the archive opens nothing, so it is left out until both are back.
+    const live = await Promise.all(
+      grants.map(
+        async (grant) =>
+          (await findGroup(db, grant.groupId)) !== null &&
+          (grant.scope === undefined || (await placeExists(db, grant.scope))),
+      ),
+    );
+    const shown = grants.filter((_, index) => live[index]);
+    response.json(await withNames(db, shown, readerOf(db, actorOf(request))));
   });
 
   /** What this token may do at a thing, or everywhere without one, so a tool can shape its view. */

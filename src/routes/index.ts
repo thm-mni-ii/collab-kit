@@ -7,6 +7,7 @@ import { requireActor } from '../auth/middleware.ts';
 import { createActorNotes, type ActorNotes } from '../db/collections/actors.ts';
 import type { WorkpieceHub } from '../realtime/index.ts';
 import { actorRoutes } from './actors.ts';
+import { archiveRoutes } from './archive.ts';
 import { roomRoutes } from './rooms.ts';
 import { groupRoutes } from './groups.ts';
 import { grantRoutes } from './grants.ts';
@@ -14,6 +15,7 @@ import { workpieceRoutes } from './workpieces.ts';
 import { eventRoutes } from './events.ts';
 import { commentRoutes } from './comments.ts';
 import { taskRoutes } from './tasks.ts';
+import { settingsRoutes } from './settings.ts';
 import { actorOf } from './http.ts';
 
 export interface ApiOptions {
@@ -51,10 +53,12 @@ export function createApi(options: ApiOptions): Router {
   api.use(grantRoutes(options.db, options.recheckAccess));
   api.use(actorRoutes(options.db));
   api.use(workpieceRoutes(options.db, options.hub, options.logger));
+  api.use(archiveRoutes(options.db, options.recheckAccess));
   api.use(eventRoutes(options.db));
   const decisions = options.decisionStates ?? [];
   api.use(commentRoutes(options.db, decisions));
   api.use(taskRoutes(options.db, decisions));
+  api.use(settingsRoutes(options.db, options.hub));
 
   return api;
 }

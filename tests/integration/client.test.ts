@@ -729,3 +729,35 @@ describe('conflicts', () => {
     ]);
   });
 });
+
+describe('settings', () => {
+  it('tells an open session which area changed, and the values come over REST', async () => {
+    const place = await freshWorkpiece();
+    const erin = open('erin', place.workpieceId);
+    await erin.synced;
+    const told: string[] = [];
+    erin.on('settingsChanged', (key) => told.push(key));
+
+    // Frank alone manages everywhere, so the other people keep their rights.
+    const admins = await createGroup(storage.db, {
+      name: 'Verwaltung',
+      createdBy: 'alice',
+      members: ['frank'],
+    });
+    await setGrant(storage.db, { groupId: admins._id, rights: ['manage'], setBy: 'alice' });
+    const frank = createCollabKitApi({ url, getToken: () => tokenOf('frank') });
+    const reader = createCollabKitApi({ url, getToken: () => tokenOf('erin') });
+
+    await frank.settings.set('sharing', { delaySeconds: 10 });
+    expect(await waitFor(() => told.length === 1)).toBe(true);
+    expect(told).toEqual(['sharing']);
+    expect(await reader.settings.get('sharing')).toEqual({ delaySeconds: 10 });
+    expect(await reader.settings.list()).toContain('sharing');
+    await expect(reader.settings.set('sharing', {})).rejects.toMatchObject({ status: 403 });
+
+    await frank.settings.remove('sharing');
+    expect(await waitFor(() => told.length === 2)).toBe(true);
+    expect(told).toEqual(['sharing', 'sharing']);
+    expect(await reader.settings.get('sharing')).toEqual({});
+  });
+});

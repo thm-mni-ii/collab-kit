@@ -2,6 +2,7 @@
 
 import { Management } from './management.ts';
 import { CkAccessCard } from './parts/access-card.ts';
+import { CkArchiveDetail } from './parts/archive.ts';
 import { CkFold } from './parts/fold.ts';
 import { CkForm } from './parts/form.ts';
 import { CkGroupDetail } from './parts/group.ts';
@@ -20,6 +21,7 @@ const elements = {
   'ck-room-detail': CkRoomDetail,
   'ck-group-detail': CkGroupDetail,
   'ck-workpiece-detail': CkWorkpieceDetail,
+  'ck-archive-detail': CkArchiveDetail,
 };
 
 // A page that loads the file twice keeps the first, a second definition would throw.
