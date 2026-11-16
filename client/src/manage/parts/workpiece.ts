@@ -6,9 +6,10 @@ import type { Group, Room, Workpiece } from '../../api.ts';
 import { cross } from '../look/icons.ts';
 import type { Texts } from '../look/texts.ts';
 import { base } from '../look/theme.ts';
-import { RIGHTS, type Use } from '../store.ts';
+import { RIGHTS, type Form, type Use } from '../store.ts';
 import { emit } from './events.ts';
 import { wording } from './wording.ts';
+import './head.ts';
 
 /** How many rooms a workpiece lies in, as the list shows it. */
 export function roomCount(t: Texts, count: number): string {
@@ -30,6 +31,7 @@ export class CkWorkpieceDetail extends LitElement {
     use: { attribute: false },
     names: { attribute: false },
     busy: { attribute: false },
+    form: { attribute: false },
   };
 
   static override styles = [base];
@@ -44,13 +46,24 @@ export class CkWorkpieceDetail extends LitElement {
   declare use: Use | undefined;
   declare names: Readonly<Record<string, string>>;
   declare busy: boolean;
+  declare form: Form | undefined;
 
   protected override render(): TemplateResult {
     const { t, workpiece, source } = this;
     const use = this.use?.workpieceId === workpiece._id ? this.use : undefined;
 
+    // Its tab takes manage everywhere, so whoever sees this may archive it.
     return html`
-      <div class="head"><h2>${workpiece.name}</h2></div>
+      <ck-head
+        .t=${t}
+        .name=${workpiece.name}
+        .manages=${true}
+        .renames=${false}
+        .nameLabel=${t.workpieceName}
+        .question=${t.archiveWorkpiece}
+        .form=${this.form}
+        .busy=${this.busy}
+      ></ck-head>
       ${
         source === undefined
           ? nothing

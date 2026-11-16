@@ -1,4 +1,4 @@
-/** <ck-head>: the name of a room or a group, with rename and delete for whoever holds manage there. */
+/** <ck-head>: the name of a room, group or workpiece, with rename and archive for whoever holds manage there. */
 
 import { LitElement, css, html, nothing, type TemplateResult } from 'lit';
 
@@ -8,12 +8,13 @@ import type { Form } from '../store.ts';
 import { emit } from './events.ts';
 import './form.ts';
 
-/** The head asks to open a form or to delete; the question of the deletion is the tool's to word. */
+/** The head asks to open a form or to archive; the question before archiving is the caller's. */
 export class CkHead extends LitElement {
   static override properties = {
     t: { attribute: false },
     name: { attribute: false },
     manages: { attribute: false },
+    renames: { attribute: false },
     nameLabel: { attribute: false },
     question: { attribute: false },
     form: { attribute: false },
@@ -39,11 +40,18 @@ export class CkHead extends LitElement {
   declare t: Texts;
   declare name: string;
   declare manages: boolean;
-  /** The label of the rename field, and the question asked before deleting. */
+  /** Whether it can be renamed; CK renames no workpiece. */
+  declare renames: boolean;
+  /** The label of the rename field, and the question asked before archiving. */
   declare nameLabel: string;
   declare question: string;
   declare form: Form | undefined;
   declare busy: boolean;
+
+  constructor() {
+    super();
+    this.renames = true;
+  }
 
   protected override render(): TemplateResult {
     const { t, form } = this;
@@ -54,14 +62,21 @@ export class CkHead extends LitElement {
         ${
           this.manages
             ? html`<span class="actions">
-                <button class="link" @click=${() => emit(this, 'ck-form-open', { kind: 'rename' })}>
-                  ${t.rename}
-                </button>
+                ${
+                  this.renames
+                    ? html`<button
+                        class="link"
+                        @click=${() => emit(this, 'ck-form-open', { kind: 'rename' })}
+                      >
+                        ${t.rename}
+                      </button>`
+                    : nothing
+                }
                 <button
                   class="link danger"
-                  @click=${() => emit(this, 'ck-form-open', { kind: 'remove' })}
+                  @click=${() => emit(this, 'ck-form-open', { kind: 'archive' })}
                 >
-                  ${t.remove}
+                  ${t.archive}
                 </button>
               </span>`
             : nothing
@@ -81,15 +96,15 @@ export class CkHead extends LitElement {
           : nothing
       }
       ${
-        form?.kind === 'remove'
+        form?.kind === 'archive'
           ? html`<div class="confirm" role="alert">
                 <p>${this.question}</p>
                 <button
                   class="button primary"
                   ?disabled=${this.busy}
-                  @click=${() => emit(this, 'ck-remove')}
+                  @click=${() => emit(this, 'ck-archive')}
                 >
-                  ${t.confirmRemove}
+                  ${t.confirmArchive}
                 </button>
                 <button class="button" @click=${() => emit(this, 'ck-form-close')}>
                   ${t.cancel}

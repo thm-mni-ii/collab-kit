@@ -56,7 +56,7 @@ export class CkRoomDetail extends LitElement {
         .name=${room.name}
         .manages=${this.manages}
         .nameLabel=${t.roomName}
-        .question=${t.removeRoom}
+        .question=${t.archiveRoom}
         .form=${form}
         .busy=${this.busy}
       ></ck-head>
