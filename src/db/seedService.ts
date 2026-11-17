@@ -7,6 +7,11 @@ import { setGrant } from './collections/grants.ts';
 /** The group that holds the service, named so a person can tell it from the groups of a tool. */
 export const SERVICE_GROUP = 'services';
 
+/** Whether the group is the one that gives the configured service its rights: its name and the service in it. */
+export function isServiceGroup(group: GroupRecord, service: string | undefined): boolean {
+  return service !== undefined && group.name === SERVICE_GROUP && group.members.includes(service);
+}
+
 /** Makes the group of services if it is missing, then keeps the service in it with every right. */
 export async function seedServiceGroup(db: Db, actorId: string): Promise<void> {
   // Look the group up by name, the one place the service reads a name.

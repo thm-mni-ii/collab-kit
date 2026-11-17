@@ -4,6 +4,7 @@ import type { Db } from 'mongodb';
 import { may, mayHandOn, maySeeGroup, placeExists, rightsAt } from '../auth/access.ts';
 import { findGrant, grantsAt, grantsOf, removeGrant, setGrant } from '../db/collections/grants.ts';
 import { findGroup } from '../db/collections/groups.ts';
+import { isServiceGroup } from '../db/seedService.ts';
 import { isAnonymousAt, readerOf } from '../auth/anonymity.ts';
 import { withNames } from '../db/names.ts';
 import type { Actor } from '../model/actor.ts';
@@ -22,7 +23,7 @@ import { defined } from '../utils/optional.ts';
 import { actorOf, bodyOf, fail, unusableField } from './http.ts';
 
 /** Who holds which rights where: the tool decides who gets them, the service that none is taken. */
-export function grantRoutes(db: Db, recheckAccess: () => Promise<void>): Router {
+export function grantRoutes(db: Db, recheckAccess: () => Promise<void>, service?: string): Router {
   const routes = Router();
 
   /** Sets what a group may do at a place, or everywhere without one, replacing what it had. */
@@ -50,7 +51,8 @@ export function grantRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
 
     // The group only receives, so it has to exist; its members stay out of the answer.
     const actor = actorOf(request);
-    if ((await findGroup(db, groupId)) === null) {
+    const group = await findGroup(db, groupId);
+    if (group === null) {
       return fail(response, 404, 'unknown group');
     }
     // An unknown and an unseen place answer alike, so nobody learns by trying what exists.
@@ -59,6 +61,10 @@ export function grantRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
     }
     if (!(await mayHandOn(db, actor, scope, rights))) {
       return fail(response, 403, 'not allowed to hand these rights on here');
+    }
+    // The grant everywhere is all the service holds, so it stays as the start set it.
+    if (scope === undefined && isServiceGroup(group, service)) {
+      return fail(response, 409, 'the rights of the service everywhere cannot be changed');
     }
 
     // The flag goes with whoever may set the grant, as it is no right of its own.
@@ -99,6 +105,11 @@ export function grantRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
     const actor = actorOf(request);
     if (!(await may(db, actor, 'manage', scope))) {
       return fail(response, 403, 'not allowed to take rights away here');
+    }
+    // Without the grant everywhere the service would hold no rights until the next start.
+    const group = scope === undefined ? await findGroup(db, groupId) : null;
+    if (group !== null && isServiceGroup(group, service)) {
+      return fail(response, 409, 'the rights of the service everywhere cannot be taken away');
     }
 
     const removed = await removeGrant(db, {
