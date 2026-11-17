@@ -20,6 +20,8 @@ const de = {
   archiveGroup:
     'Gruppe archivieren? Ihre Mitglieder verlieren sofort, was die Gruppe ihnen gab, bis sie zurückgeholt wird.',
   archiveWorkpiece: 'Werkstück archivieren? Seine Abzweige gehen mit, offene Sitzungen enden.',
+  serviceGroup:
+    'Diese Gruppe gibt angebundenen Diensten überall alle Rechte. Damit sie weiterarbeiten, lässt sie sich hier nicht archivieren, umbenennen oder in diesen Rechten ändern.',
   confirmArchive: 'Ja, archivieren',
   archiveTab: 'Archiv',
   noArchived: 'Das Archiv ist leer.',
@@ -183,6 +185,8 @@ const en: Texts = {
   archiveGroup:
     'Archive group? Its members lose at once what the group gave them, until it is restored.',
   archiveWorkpiece: 'Archive workpiece? Its forks go along, open sessions end.',
+  serviceGroup:
+    'This group gives connected services all rights everywhere. So they keep working, it cannot be archived, renamed or changed in these rights here.',
   confirmArchive: 'Yes, archive',
   archiveTab: 'Archive',
   noArchived: 'The archive is empty.',
