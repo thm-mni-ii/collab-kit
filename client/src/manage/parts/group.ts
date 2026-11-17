@@ -117,17 +117,21 @@ export class CkGroupDetail extends LitElement {
 
   protected override render(): TemplateResult {
     const { t, group, form } = this;
+    // The server refuses to take the group of the services apart, so that is not offered.
+    const fixed = isServiceGroup(group);
+    const manages = this.manages && !fixed;
 
     return html`
       <ck-head
         .t=${t}
         .name=${group.name}
-        .manages=${this.manages}
+        .manages=${manages}
         .nameLabel=${t.groupName}
         .question=${t.archiveGroup}
         .form=${form}
         .busy=${this.busy}
       ></ck-head>
+      ${fixed ? html`<p class="hint">${t.serviceGroup}</p>` : nothing}
       <h3>${counted(t.members, group.members.length)}</h3>
       <p class="lead">${t.leadMembers}</p>
       ${
@@ -136,11 +140,11 @@ export class CkGroupDetail extends LitElement {
           : html`<ck-fold
               .t=${t}
               .limit=${5}
-              .items=${group.members.map((actorId) => this.memberRow(actorId))}
+              .items=${group.members.map((actorId) => this.memberRow(actorId, fixed))}
             ></ck-fold>`
       }
       ${
-        this.manages
+        manages
           ? html`<button
               class="link"
               @click=${() => emit(this, 'ck-form-open', { kind: 'member' })}
@@ -150,7 +154,7 @@ export class CkGroupDetail extends LitElement {
           : nothing
       }
       ${
-        this.manages && form?.kind === 'member'
+        manages && form?.kind === 'member'
           ? html`<ck-form
                 .t=${t}
                 .kind=${'member'}
@@ -162,13 +166,13 @@ export class CkGroupDetail extends LitElement {
               ${form.found === undefined ? nothing : this.found(form.found)}`
           : nothing
       }
-      ${this.grants === undefined ? nothing : this.everywhere(this.grants)}
+      ${this.grants === undefined || fixed ? nothing : this.everywhere(this.grants)}
       ${this.grants === undefined ? nothing : this.access(this.grants)}
     `;
   }
 
-  /** One member by name, its key beside it; without a name only the key. */
-  private memberRow(actorId: string): TemplateResult {
+  /** One member by name, its key beside it; without a name only the key. A service stays in a fixed group. */
+  private memberRow(actorId: string, fixed: boolean): TemplateResult {
     const { t } = this;
     const name = this.names[actorId];
 
@@ -177,7 +181,7 @@ export class CkGroupDetail extends LitElement {
         ${name ?? actorId}${name === undefined ? nothing : html`<span class="key">${actorId}</span>`}
       </span>
       ${
-        this.manages
+        this.manages && !(fixed && isServiceKey(actorId))
           ? html`<button
               class="link danger icon"
               aria-label=${t.dismiss}
@@ -303,4 +307,14 @@ export class CkGroupDetail extends LitElement {
             ></ck-fold>`
       }`;
   }
+}
+
+/** The group that gives services their rights: named services, a service in it; the server decides for sure. */
+function isServiceGroup(group: Group): boolean {
+  return group.name === 'services' && group.members.some(isServiceKey);
+}
+
+/** A key a service signs for itself, told by its prefix. */
+function isServiceKey(key: string): boolean {
+  return key.startsWith('service-');
 }

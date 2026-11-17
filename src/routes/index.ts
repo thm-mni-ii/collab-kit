@@ -29,6 +29,8 @@ export interface ApiOptions {
   readonly decisionStates?: readonly string[];
   /** Shared with the hub, so a name is written once; left out, the routes keep their own. */
   readonly noteActor?: ActorNotes;
+  /** The key of the configured service; its group cannot be taken apart. Left out, there is none. */
+  readonly service?: string;
 }
 
 /** Every route behind requireActor: who acts comes from the token, never from a body. */
@@ -49,8 +51,8 @@ export function createApi(options: ApiOptions): Router {
   api.use(express.json({ limit: '1mb' }));
 
   api.use(roomRoutes(options.db, options.hub, options.recheckAccess));
-  api.use(groupRoutes(options.db, options.recheckAccess));
-  api.use(grantRoutes(options.db, options.recheckAccess));
+  api.use(groupRoutes(options.db, options.recheckAccess, options.service));
+  api.use(grantRoutes(options.db, options.recheckAccess, options.service));
   api.use(actorRoutes(options.db));
   api.use(workpieceRoutes(options.db, options.hub, options.logger));
   api.use(archiveRoutes(options.db, options.recheckAccess));

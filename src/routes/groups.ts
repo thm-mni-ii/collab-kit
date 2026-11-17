@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { Db } from 'mongodb';
+import type { Db, ObjectId } from 'mongodb';
 
 import { groupsVisibleTo, may, mayAddMember, maySee, maySeeGroup } from '../auth/access.ts';
 import { archiveGroup } from '../db/archive/move.ts';
@@ -15,13 +15,14 @@ import {
 } from '../db/collections/groups.ts';
 import { readerOf } from '../auth/anonymity.ts';
 import { withNames } from '../db/names.ts';
-import { isPseudonym } from '../model/actor.ts';
+import { isServiceGroup } from '../db/seedService.ts';
+import { isPseudonym, isServiceKey } from '../model/actor.ts';
 import { asActorId, asEvery, asObject, asText, PSEUDONYM_RULE } from '../utils/input.ts';
 import { defined } from '../utils/optional.ts';
 import { actorOf, bodyOf, fail, guard, idOf, requireId, unusableField } from './http.ts';
 
 /** A group is a set of actors; what it stands for, a role say, lives in settings, unread. */
-export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router {
+export function groupRoutes(db: Db, recheckAccess: () => Promise<void>, service?: string): Router {
   const routes = Router();
 
   routes.param('id', requireId('group'));
@@ -45,6 +46,11 @@ export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
     403,
     'not allowed to change this group',
   );
+  /** Whether the id names the group of the service, which only the next start would build again. */
+  const ofService = async (id: ObjectId): Promise<boolean> => {
+    const group = await findGroup(db, id);
+    return group !== null && isServiceGroup(group, service);
+  };
 
   routes.post('/groups', async (request, response) => {
     // A group lies in nothing, so creating one takes manage everywhere; new, it holds no grant.
@@ -120,6 +126,10 @@ export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
 
     // Only the name leaves a trace; the settings are the tool's and never read here.
     const id = idOf(request);
+    // Under another name the next start would make the group of the service once more.
+    if (name !== undefined && (await ofService(id))) {
+      return fail(response, 409, 'the group of the service cannot be renamed');
+    }
     if (name !== undefined) {
       await renameGroup(db, id, {
         name,
@@ -140,6 +150,10 @@ export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
     const unusable = unusableField(body, { reason });
     if (unusable !== undefined) {
       return fail(response, 400, `${unusable} is unusable`);
+    }
+    // Archived, it would leave the service without rights until the next start.
+    if (await ofService(idOf(request))) {
+      return fail(response, 409, 'the group of the service cannot be archived');
     }
 
     const entry = await archiveGroup(db, archive, idOf(request), {
@@ -166,6 +180,10 @@ export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
     }
 
     const id = idOf(request);
+    // Every member holds all rights everywhere, so a person in it would be top without showing it.
+    if (!isServiceKey(actorId) && (await ofService(id))) {
+      return fail(response, 409, 'only services may join the group of the service');
+    }
     const added = await addMember(db, id, { actorId, addedBy: actorOf(request).actorId });
     // The new member may now write where they only read, so their connections are asked again.
     if (added) {
@@ -184,6 +202,10 @@ export function groupRoutes(db: Db, recheckAccess: () => Promise<void>): Router 
     }
 
     const id = idOf(request);
+    // Without the group the service holds no rights until the next start; other members may go.
+    if (actorId === service && (await ofService(id))) {
+      return fail(response, 409, 'the service cannot leave its group');
+    }
     await removeMember(db, id, { actorId, removedBy: actorOf(request).actorId });
     // An open connection of the removed actor would otherwise carry on as before.
     await recheckAccess();
