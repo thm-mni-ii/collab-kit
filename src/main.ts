@@ -74,7 +74,7 @@ const server = createServer({
     noteActor,
     // The gateway is attached below; it needs this server, and these routes need it.
     recheckAccess: () => gateway.recheck(),
-    ...defined({ decisionStates: config.decisionStates }),
+    ...defined({ decisionStates: config.decisionStates, service: config.service?.actor }),
   }),
   ...defined({ allowedOrigins: config.allowedOrigins }),
 });
