@@ -26,6 +26,7 @@ export class Management extends LitElement implements ManagementElement {
     findPeople: { attribute: false },
     tabs: { attribute: false },
     extraTabs: { attribute: false },
+    archiveDelete: { attribute: false },
     language: { attribute: 'lang' },
     infoOpen: { state: true },
   };
@@ -37,6 +38,7 @@ export class Management extends LitElement implements ManagementElement {
   declare findPeople: ManagementOptions['findPeople'];
   declare tabs: ManagementOptions['tabs'];
   declare extraTabs: ManagementOptions['extraTabs'];
+  declare archiveDelete: ManagementOptions['archiveDelete'];
   /** The lang attribute; left out, the one of the page counts. */
   declare language: string | undefined;
   /** Whether the longer explanation under the title is shown. */
@@ -423,6 +425,7 @@ export class Management extends LitElement implements ManagementElement {
       .rooms=${store.state.rooms}
       .form=${store.state.form}
       .busy=${store.state.busy}
+      .canDelete=${this.archiveDelete === true}
     ></ck-archive-detail>`;
   }
 

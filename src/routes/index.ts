@@ -25,6 +25,8 @@ export interface ApiOptions {
   readonly logger: Logger;
   /** Called after a route took access away, so open connections are asked again. */
   readonly recheckAccess: () => Promise<void>;
+  /** Whether an archive entry may be deleted for good; left out, it may. */
+  readonly archiveDelete?: boolean;
   /** States the tool names a decision, which only decide may set; left out, none. */
   readonly decisionStates?: readonly string[];
   /** Shared with the hub, so a name is written once; left out, the routes keep their own. */
@@ -55,7 +57,7 @@ export function createApi(options: ApiOptions): Router {
   api.use(grantRoutes(options.db, options.recheckAccess, options.service));
   api.use(actorRoutes(options.db));
   api.use(workpieceRoutes(options.db, options.hub, options.logger));
-  api.use(archiveRoutes(options.db, options.recheckAccess));
+  api.use(archiveRoutes(options.db, options.recheckAccess, options.archiveDelete ?? true));
   api.use(eventRoutes(options.db));
   const decisions = options.decisionStates ?? [];
   api.use(commentRoutes(options.db, decisions));

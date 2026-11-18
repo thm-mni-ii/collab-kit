@@ -21,6 +21,7 @@ export class CkArchiveDetail extends LitElement {
     rooms: { attribute: false },
     form: { attribute: false },
     busy: { attribute: false },
+    canDelete: { attribute: false },
   };
 
   static override styles = [
@@ -46,6 +47,8 @@ export class CkArchiveDetail extends LitElement {
   declare rooms: readonly Room[];
   declare form: Form | undefined;
   declare busy: boolean;
+  /** Whether deleting for good is offered at all. */
+  declare canDelete: boolean;
 
   protected override render(): TemplateResult {
     const { t, entry, form } = this;
@@ -77,12 +80,19 @@ export class CkArchiveDetail extends LitElement {
         >
           ${t.restore}
         </button>
-        <button class="link danger" @click=${() => emit(this, 'ck-form-open', { kind: 'delete' })}>
-          ${t.deleteForGood}
-        </button>
+        ${
+          this.canDelete
+            ? html`<button
+                class="link danger"
+                @click=${() => emit(this, 'ck-form-open', { kind: 'delete' })}
+              >
+                ${t.deleteForGood}
+              </button>`
+            : nothing
+        }
       </div>
       ${
-        form?.kind === 'delete'
+        this.canDelete && form?.kind === 'delete'
           ? html`<div class="confirm" role="alert">
                 <p>${t.deleteQuestion}</p>
                 <button
