@@ -813,6 +813,36 @@ describe('deleting from the archive', () => {
     expect(await tracesOf(storage.archive, [roomId])).toBeGreaterThan(0);
   });
 
+  it('refuses every archive route when the instance switched the archive off', async () => {
+    const { roomId, id } = await roomWithWorkpiece();
+    expect((await archiveKindAs('alice', 'rooms', roomId)).status).toBe(200);
+    const [entry] = await listAs('admin', 'room');
+
+    const off = createServer({
+      logger: silent,
+      api: createApi({
+        db: storage.db,
+        hub,
+        checkToken: createTokenCheck({ key: secret, algorithm: 'HS256' }),
+        logger: silent,
+        recheckAccess: async () => undefined,
+        archiveEnabled: false,
+      }),
+    });
+    const refused = [
+      await request(off).get('/archive').set(as('admin')),
+      await request(off).post(`/archive/${entry?._id}/restore`).set(as('admin')),
+      await request(off).delete(`/archive/${entry?._id}`).set(as('admin')),
+      await request(off).post(`/rooms/${roomId}/archive`).set(as('admin')),
+      await request(off).post(`/groups/${roomId}/archive`).set(as('admin')),
+      await request(off).post(`/workpieces/${id}/archive`).set(as('admin')),
+    ];
+    expect(refused.map((answer) => answer.status)).toEqual([403, 403, 403, 403, 403, 403]);
+    // What was archived stays where it is.
+    expect(await tracesOf(storage.archive, [roomId])).toBeGreaterThan(0);
+    expect(await storage.db.collection('workpieces').countDocuments({ _id: id })).toBe(1);
+  });
+
   it('deletes a group for good with the grants it holds and those at it', async () => {
     const { roomId, managersId } = await roomWithWorkpiece();
     const team = await teamIn(roomId, managersId);

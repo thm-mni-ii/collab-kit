@@ -30,6 +30,7 @@ export class CkWorkpieceDetail extends LitElement {
     groups: { attribute: false },
     use: { attribute: false },
     names: { attribute: false },
+    archives: { attribute: false },
     busy: { attribute: false },
     form: { attribute: false },
   };
@@ -45,6 +46,8 @@ export class CkWorkpieceDetail extends LitElement {
   /** Loaded for this workpiece, or still under way. */
   declare use: Use | undefined;
   declare names: Readonly<Record<string, string>>;
+  /** Whether the archive is switched on, so this can be archived. */
+  declare archives: boolean;
   declare busy: boolean;
   declare form: Form | undefined;
 
@@ -60,6 +63,7 @@ export class CkWorkpieceDetail extends LitElement {
         .manages=${true}
         .renames=${false}
         .nameLabel=${t.workpieceName}
+        .archives=${this.archives}
         .question=${t.archiveWorkpiece}
         .form=${this.form}
         .busy=${this.busy}

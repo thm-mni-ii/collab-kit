@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import type { Db, ObjectId } from 'mongodb';
 
 import { may, rightsAtEntry } from '../auth/access.ts';
@@ -105,3 +105,16 @@ export function archiveRoutes(
 function isArchiveKind(raw: unknown): raw is ArchiveKind {
   return (ARCHIVE_KINDS as readonly unknown[]).includes(raw);
 }
+
+/** Archiving a room, group or workpiece, which sits with the routes of each kind. */
+const ARCHIVING = /^\/(rooms|groups|workpieces)\/[^/]+\/archive$/;
+
+/** Answers 403 on every route of the archive, and on archiving, when the archive is switched off. */
+export const archiveOff: RequestHandler = (request, response, next) => {
+  // The archive itself, or the archiving of one thing.
+  const path = request.path;
+  if (path === '/archive' || path.startsWith('/archive/') || ARCHIVING.test(path)) {
+    return fail(response, 403, 'the archive is switched off');
+  }
+  next();
+};
