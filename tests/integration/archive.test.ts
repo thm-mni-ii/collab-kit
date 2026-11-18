@@ -792,6 +792,27 @@ describe('deleting from the archive', () => {
     expect(await storage.db.collection('workpieces').countDocuments({ _id: id })).toBe(1);
   });
 
+  it('refuses deleting for good for everybody when the instance switched it off', async () => {
+    const { roomId } = await roomWithWorkpiece();
+    expect((await archiveKindAs('alice', 'rooms', roomId)).status).toBe(200);
+    const [entry] = await listAs('admin', 'room');
+
+    const locked = createServer({
+      logger: silent,
+      api: createApi({
+        db: storage.db,
+        hub,
+        checkToken: createTokenCheck({ key: secret, algorithm: 'HS256' }),
+        logger: silent,
+        recheckAccess: async () => undefined,
+        archiveDelete: false,
+      }),
+    });
+    const answer = await request(locked).delete(`/archive/${entry?._id}`).set(as('admin'));
+    expect(answer.status).toBe(403);
+    expect(await tracesOf(storage.archive, [roomId])).toBeGreaterThan(0);
+  });
+
   it('deletes a group for good with the grants it holds and those at it', async () => {
     const { roomId, managersId } = await roomWithWorkpiece();
     const team = await teamIn(roomId, managersId);

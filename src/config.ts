@@ -43,6 +43,8 @@ export interface Config {
   readonly top?: TopClaim;
   /** SERVICE_*: a second source, whose tokens a service signs itself; left out, there is none. */
   readonly service?: ServiceSource;
+  /** ARCHIVE_DELETE: whether deleting an archive entry for good is allowed; false, the default, answers 403. */
+  readonly archiveDelete: boolean;
   /** States the tool names a decision, so setting one takes decide; left out, none does. */
   readonly decisionStates?: readonly string[];
   /** Largest WebSocket message; left out, the gateway keeps its own default. */
@@ -109,6 +111,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const service = readService(env, jwtIssuer, problems);
   const top = readTop(env, problems);
   const decisionStates = optionalList(env, 'DECISION_STATES');
+  // Blank means false, so deleting for good is off until an instance switches it on.
+  const archiveDeleteRaw = optionalValue(env, 'ARCHIVE_DELETE') ?? 'false';
+  if (archiveDeleteRaw !== 'true' && archiveDeleteRaw !== 'false') {
+    problems.push(`ARCHIVE_DELETE must be true or false, got "${archiveDeleteRaw}"`);
+  }
 
   if (problems.length > 0) {
     throw new Error(`invalid configuration:\n  - ${problems.join('\n  - ')}`);
@@ -127,6 +134,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // The standard claims of RFC 7519 and OpenID Connect, for a tool that follows them.
     actorClaim: optionalValue(env, 'ACTOR_CLAIM') ?? 'sub',
     labelClaim: optionalValue(env, 'LABEL_CLAIM') ?? 'name',
+    archiveDelete: archiveDeleteRaw === 'true',
     ...defined({
       jwtIssuer,
       jwtAudience,

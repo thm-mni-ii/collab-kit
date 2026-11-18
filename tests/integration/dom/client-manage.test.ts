@@ -590,7 +590,7 @@ describe('<ck-management>', () => {
     const archivedIds = async () => (await alice.archive.list()).map((entry) => entry._id);
 
     // Each only once confirmed.
-    const element = await mount(alice);
+    const element = await mount(alice, { archiveDelete: true });
     await click(element, 'Übung 13');
     await click(element, 'Archivieren');
     expect(textOf(element)).toContain('Raum archivieren?');
@@ -631,6 +631,17 @@ describe('<ck-management>', () => {
     expect(textOf(element)).toContain('Endgültig gelöscht.');
     expect(await archivedIds()).not.toContain(group._id);
     expect(textOf(element)).not.toContain('Team M');
+  });
+
+  it('hides deleting for good in the archive unless archiveDelete is true', async () => {
+    const room = await alice.rooms.create({ name: 'Altraum' });
+    await alice.rooms.archive(room._id);
+    const element = await mount(alice);
+
+    await click(element, 'Archiv');
+    await pickWorkpiece(element, 'Altraum');
+    expect(textOf(element)).toContain('Zurückholen');
+    expect(() => button(element, 'Endgültig löschen')).toThrow();
   });
 
   it('shows on reload a room the tool created elsewhere', async () => {
