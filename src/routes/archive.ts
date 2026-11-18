@@ -12,7 +12,11 @@ import { defined } from '../utils/optional.ts';
 import { actorOf, fail, guard, idOf, requireId, unusableField } from './http.ts';
 
 /** What was archived, bringing it back and deleting it; archiving sits with each kind's routes. */
-export function archiveRoutes(db: Db, recheckAccess: () => Promise<void>): Router {
+export function archiveRoutes(
+  db: Db,
+  recheckAccess: () => Promise<void>,
+  archiveDelete: boolean,
+): Router {
   const archive = archiveOf(db);
   const routes = Router();
 
@@ -38,7 +42,7 @@ export function archiveRoutes(db: Db, recheckAccess: () => Promise<void>): Route
   );
   // Gone for good cannot be undone, so it takes manage everywhere; behind seeing as well.
   const deleting = guard(
-    async (actor) => may(db, actor, 'manage'),
+    async (actor) => archiveDelete && (await may(db, actor, 'manage')),
     403,
     'not allowed to delete this entry',
   );

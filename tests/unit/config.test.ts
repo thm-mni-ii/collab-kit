@@ -23,6 +23,7 @@ describe('readConfig', () => {
       jwtKey: { jwksUri },
       jwtClockTolerance: 5,
       actorClaim: 'sub',
+      archiveDelete: false,
       labelClaim: 'name',
     });
   });
@@ -177,6 +178,14 @@ describe('readConfig', () => {
     });
     expect(() => readConfig({ ...top, TOP_SEES_PSEUDONYMS: 'no' })).toThrowError(
       /TOP_SEES_PSEUDONYMS must be true or false/,
+    );
+  });
+
+  it('forbids deleting from the archive unless ARCHIVE_DELETE is true', () => {
+    expect(readConfig(valid).archiveDelete).toBe(false);
+    expect(readConfig({ ...valid, ARCHIVE_DELETE: ' true ' }).archiveDelete).toBe(true);
+    expect(() => readConfig({ ...valid, ARCHIVE_DELETE: 'no' })).toThrowError(
+      /ARCHIVE_DELETE must be true or false/,
     );
   });
 
