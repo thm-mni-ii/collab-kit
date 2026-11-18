@@ -746,6 +746,8 @@ export interface ManagementOptions {
   findPeople: ((text: string) => Promise<readonly ActorName[]>) | undefined;
   /** The own tabs to show, in their fixed order; left out, all; workpieces and archive still take manage everywhere. */
   tabs: readonly ManagementOwnTab[] | undefined;
+  /** Whether the archive is shown, tab and buttons; left out, it is not. CK refuses it unless ARCHIVE_ENABLED is true. */
+  archive: boolean | undefined;
   /** Whether the archive offers deleting for good; left out, it does not. CK refuses it unless ARCHIVE_DELETE is true. */
   archiveDelete: boolean | undefined;
   /** Tabs of the tool after the own ones, each showing the slot of its id; left out, none. */

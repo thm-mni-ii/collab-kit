@@ -43,6 +43,8 @@ export interface Config {
   readonly top?: TopClaim;
   /** SERVICE_*: a second source, whose tokens a service signs itself; left out, there is none. */
   readonly service?: ServiceSource;
+  /** ARCHIVE_ENABLED: whether the archive exists at all; false, the default, answers 403 on every archive route. */
+  readonly archiveEnabled: boolean;
   /** ARCHIVE_DELETE: whether deleting an archive entry for good is allowed; false, the default, answers 403. */
   readonly archiveDelete: boolean;
   /** States the tool names a decision, so setting one takes decide; left out, none does. */
@@ -111,6 +113,11 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const service = readService(env, jwtIssuer, problems);
   const top = readTop(env, problems);
   const decisionStates = optionalList(env, 'DECISION_STATES');
+  // Blank means false, so the archive is off until an instance switches it on.
+  const archiveEnabledRaw = optionalValue(env, 'ARCHIVE_ENABLED') ?? 'false';
+  if (archiveEnabledRaw !== 'true' && archiveEnabledRaw !== 'false') {
+    problems.push(`ARCHIVE_ENABLED must be true or false, got "${archiveEnabledRaw}"`);
+  }
   // Blank means false, so deleting for good is off until an instance switches it on.
   const archiveDeleteRaw = optionalValue(env, 'ARCHIVE_DELETE') ?? 'false';
   if (archiveDeleteRaw !== 'true' && archiveDeleteRaw !== 'false') {
@@ -134,6 +141,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // The standard claims of RFC 7519 and OpenID Connect, for a tool that follows them.
     actorClaim: optionalValue(env, 'ACTOR_CLAIM') ?? 'sub',
     labelClaim: optionalValue(env, 'LABEL_CLAIM') ?? 'name',
+    archiveEnabled: archiveEnabledRaw === 'true',
     archiveDelete: archiveDeleteRaw === 'true',
     ...defined({
       jwtIssuer,

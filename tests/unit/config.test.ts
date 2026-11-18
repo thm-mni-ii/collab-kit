@@ -23,6 +23,7 @@ describe('readConfig', () => {
       jwtKey: { jwksUri },
       jwtClockTolerance: 5,
       actorClaim: 'sub',
+      archiveEnabled: false,
       archiveDelete: false,
       labelClaim: 'name',
     });
@@ -178,6 +179,14 @@ describe('readConfig', () => {
     });
     expect(() => readConfig({ ...top, TOP_SEES_PSEUDONYMS: 'no' })).toThrowError(
       /TOP_SEES_PSEUDONYMS must be true or false/,
+    );
+  });
+
+  it('switches the archive off unless ARCHIVE_ENABLED is true', () => {
+    expect(readConfig(valid).archiveEnabled).toBe(false);
+    expect(readConfig({ ...valid, ARCHIVE_ENABLED: ' true ' }).archiveEnabled).toBe(true);
+    expect(() => readConfig({ ...valid, ARCHIVE_ENABLED: 'no' })).toThrowError(
+      /ARCHIVE_ENABLED must be true or false/,
     );
   });
 

@@ -7,7 +7,7 @@ import { requireActor } from '../auth/middleware.ts';
 import { createActorNotes, type ActorNotes } from '../db/collections/actors.ts';
 import type { WorkpieceHub } from '../realtime/index.ts';
 import { actorRoutes } from './actors.ts';
-import { archiveRoutes } from './archive.ts';
+import { archiveOff, archiveRoutes } from './archive.ts';
 import { roomRoutes } from './rooms.ts';
 import { groupRoutes } from './groups.ts';
 import { grantRoutes } from './grants.ts';
@@ -25,6 +25,8 @@ export interface ApiOptions {
   readonly logger: Logger;
   /** Called after a route took access away, so open connections are asked again. */
   readonly recheckAccess: () => Promise<void>;
+  /** Whether the archive exists; left out, it does. */
+  readonly archiveEnabled?: boolean;
   /** Whether an archive entry may be deleted for good; left out, it may. */
   readonly archiveDelete?: boolean;
   /** States the tool names a decision, which only decide may set; left out, none. */
@@ -51,6 +53,11 @@ export function createApi(options: ApiOptions): Router {
     next();
   });
   api.use(express.json({ limit: '1mb' }));
+
+  // With the archive off, every route of it answers 403 before any other route sees the request.
+  if (options.archiveEnabled === false) {
+    api.use(archiveOff);
+  }
 
   api.use(roomRoutes(options.db, options.hub, options.recheckAccess));
   api.use(groupRoutes(options.db, options.recheckAccess, options.service));
