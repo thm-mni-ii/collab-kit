@@ -26,6 +26,7 @@ export class CkRoomDetail extends LitElement {
     edits: { attribute: false },
     grants: { attribute: false },
     creates: { attribute: false },
+    archives: { attribute: false },
     busy: { attribute: false },
     form: { attribute: false },
   };
@@ -44,6 +45,8 @@ export class CkRoomDetail extends LitElement {
   declare grants: readonly Grant[] | undefined;
   /** Whether the tool gave newWorkpiece, so workpieces can be created here. */
   declare creates: boolean;
+  /** Whether the archive is switched on, so this can be archived. */
+  declare archives: boolean;
   declare busy: boolean;
   declare form: Form | undefined;
 
@@ -56,6 +59,7 @@ export class CkRoomDetail extends LitElement {
         .name=${room.name}
         .manages=${this.manages}
         .nameLabel=${t.roomName}
+        .archives=${this.archives}
         .question=${t.archiveRoom}
         .form=${form}
         .busy=${this.busy}

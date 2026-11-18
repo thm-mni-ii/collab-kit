@@ -26,6 +26,7 @@ export class CkGroupDetail extends LitElement {
     searches: { attribute: false },
     mayEverywhere: { attribute: false },
     leaving: { state: true },
+    archives: { attribute: false },
     busy: { attribute: false },
     form: { attribute: false },
     placeName: { attribute: false },
@@ -98,6 +99,8 @@ export class CkGroupDetail extends LitElement {
   declare mayEverywhere: boolean;
   /** Whether the person is asked before access everywhere goes. */
   declare leaving: boolean;
+  /** Whether the archive is switched on, so this can be archived. */
+  declare archives: boolean;
   declare busy: boolean;
   /** The open form; for a member it holds the people findPeople gave, when it was more than one. */
   declare form: Form | undefined;
@@ -127,6 +130,7 @@ export class CkGroupDetail extends LitElement {
         .name=${group.name}
         .manages=${manages}
         .nameLabel=${t.groupName}
+        .archives=${this.archives}
         .question=${t.archiveGroup}
         .form=${form}
         .busy=${this.busy}

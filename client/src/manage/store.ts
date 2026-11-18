@@ -156,7 +156,8 @@ export class Store {
         ck.me.rooms(),
         ck.groups.list(),
         ck.workpieces.list(),
-        ck.archive.list(),
+        // With the archive off, CK would refuse the call.
+        this.host.archive === true ? ck.archive.list() : Promise.resolve([]),
       ]);
       // Another ck came meanwhile and loads its own.
       if (ck !== this.host.ck) {
@@ -179,11 +180,14 @@ export class Store {
     });
   }
 
-  /** The own tabs in the bar: those the tool chose, workpieces and archive only with manage everywhere. */
+  /** The own tabs in the bar: those the tool chose, workpieces and archive only with manage everywhere, archive only if switched on. */
   shownTabs(): Tab[] {
     const chosen = this.host.tabs ?? TABS;
     return TABS.filter(
-      (tab) => chosen.includes(tab) && (this.state.mayCreate || !TOP_TABS.has(tab)),
+      (tab) =>
+        chosen.includes(tab) &&
+        (this.state.mayCreate || !TOP_TABS.has(tab)) &&
+        (tab !== 'archive' || this.host.archive === true),
     );
   }
 

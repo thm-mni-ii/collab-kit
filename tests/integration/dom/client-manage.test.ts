@@ -57,7 +57,8 @@ function as(actor: string, top = false): CollabKitApi {
 /** Puts the element into the page as a tool would, and waits until it shows what CK gave. */
 async function mount(ck: CollabKitApi, options: Partial<ManagementOptions> = {}) {
   const element = document.createElement('ck-management') as Management;
-  Object.assign(element, options);
+  // The archive is off unless a test turns it on, so most tests do.
+  Object.assign(element, { archive: true, ...options });
   element.ck = ck;
   document.body.append(element);
   await settled(element);
@@ -642,6 +643,19 @@ describe('<ck-management>', () => {
     await pickWorkpiece(element, 'Altraum');
     expect(textOf(element)).toContain('Zurückholen');
     expect(() => button(element, 'Endgültig löschen')).toThrow();
+  });
+
+  it('shows no archive tab and no archive button unless archive is true', async () => {
+    const room = await alice.rooms.create({ name: 'Altraum' });
+    await alice.rooms.archive(room._id);
+    await alice.rooms.create({ name: 'Neuraum' });
+    const element = await mount(alice, { archive: false });
+
+    expect(textOf(element)).not.toContain('Archiv');
+    // The one live room is shown, with rename but without archiving.
+    expect(textOf(element)).toContain('Neuraum');
+    expect(() => button(element, 'Archivieren')).toThrow();
+    expect(textOf(element)).not.toContain('Altraum');
   });
 
   it('shows on reload a room the tool created elsewhere', async () => {

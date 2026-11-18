@@ -26,6 +26,7 @@ export class Management extends LitElement implements ManagementElement {
     findPeople: { attribute: false },
     tabs: { attribute: false },
     extraTabs: { attribute: false },
+    archive: { attribute: false },
     archiveDelete: { attribute: false },
     language: { attribute: 'lang' },
     infoOpen: { state: true },
@@ -38,6 +39,7 @@ export class Management extends LitElement implements ManagementElement {
   declare findPeople: ManagementOptions['findPeople'];
   declare tabs: ManagementOptions['tabs'];
   declare extraTabs: ManagementOptions['extraTabs'];
+  declare archive: ManagementOptions['archive'];
   declare archiveDelete: ManagementOptions['archiveDelete'];
   /** The lang attribute; left out, the one of the page counts. */
   declare language: string | undefined;
@@ -381,6 +383,7 @@ export class Management extends LitElement implements ManagementElement {
       .names=${store.state.names}
       .busy=${store.state.busy}
       .form=${store.state.form}
+      .archives=${this.archive === true}
     ></ck-workpiece-detail>`;
   }
 
@@ -448,6 +451,7 @@ export class Management extends LitElement implements ManagementElement {
       .creates=${this.newWorkpiece !== undefined}
       .busy=${store.state.busy}
       .form=${store.state.form}
+      .archives=${this.archive === true}
     ></ck-room-detail>`;
   }
 
@@ -470,6 +474,7 @@ export class Management extends LitElement implements ManagementElement {
       .busy=${store.state.busy}
       .form=${store.state.form}
       .placeName=${(scope: Parameters<Store['placeName']>[0]) => store.placeName(scope)}
+      .archives=${this.archive === true}
     ></ck-group-detail>`;
   }
 

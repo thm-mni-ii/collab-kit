@@ -15,6 +15,7 @@ export class CkHead extends LitElement {
     name: { attribute: false },
     manages: { attribute: false },
     renames: { attribute: false },
+    archives: { attribute: false },
     nameLabel: { attribute: false },
     question: { attribute: false },
     form: { attribute: false },
@@ -42,6 +43,8 @@ export class CkHead extends LitElement {
   declare manages: boolean;
   /** Whether it can be renamed; CK renames no workpiece. */
   declare renames: boolean;
+  /** Whether it can be archived; the archive may be off. */
+  declare archives: boolean;
   /** The label of the rename field, and the question asked before archiving. */
   declare nameLabel: string;
   declare question: string;
@@ -51,6 +54,7 @@ export class CkHead extends LitElement {
   constructor() {
     super();
     this.renames = true;
+    this.archives = false;
   }
 
   protected override render(): TemplateResult {
@@ -72,12 +76,16 @@ export class CkHead extends LitElement {
                       </button>`
                     : nothing
                 }
-                <button
-                  class="link danger"
-                  @click=${() => emit(this, 'ck-form-open', { kind: 'archive' })}
-                >
-                  ${t.archive}
-                </button>
+                ${
+                  this.archives
+                    ? html`<button
+                        class="link danger"
+                        @click=${() => emit(this, 'ck-form-open', { kind: 'archive' })}
+                      >
+                        ${t.archive}
+                      </button>`
+                    : nothing
+                }
               </span>`
             : nothing
         }
