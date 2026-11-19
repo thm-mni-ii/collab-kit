@@ -159,6 +159,8 @@ const de = {
   nobodyFound: 'Niemand gefunden.',
   signedOut: 'Die Anmeldung ist abgelaufen.',
   notAllowed: 'Dafür fehlt dir das Recht.',
+  archiveDisabled: 'Das Archiv ist auf diesem Server ausgeschaltet.',
+  deleteDisabled: 'Endgültiges Löschen ist auf diesem Server nicht erlaubt.',
   notFound: 'Das gibt es nicht mehr, oder du siehst es nicht.',
 };
 
@@ -323,6 +325,8 @@ const en: Texts = {
   nobodyFound: 'Nobody found.',
   signedOut: 'Your sign-in has expired.',
   notAllowed: "You don't have the right for that.",
+  archiveDisabled: 'The archive is switched off on this server.',
+  deleteDisabled: 'Deleting for good is not allowed on this server.',
   notFound: "That no longer exists, or you can't see it.",
 };
 

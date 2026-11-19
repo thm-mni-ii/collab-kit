@@ -101,6 +101,7 @@ export function createRoutes(baseUrl: string, getToken: () => string | Promise<s
       archive: (id, options = {}) => write('POST', `/workpieces/${segment(id)}/archive`, options),
     },
     archive: {
+      capabilities: () => read('/archive/capabilities'),
       list: (query = {}) => read('/archive', { ...query }),
       restore: (id) => write('POST', `/archive/${segment(id)}/restore`, {}),
       remove: (id, options = {}) => remove(`/archive/${segment(id)}`, { ...options }),

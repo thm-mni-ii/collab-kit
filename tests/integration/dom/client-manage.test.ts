@@ -6,11 +6,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 // First, so the page is there before Lit loads.
 import { page } from './page.ts';
-import type {
-  CollabKitApi,
-  ManagementElement,
-  ManagementOpen,
-  ManagementOptions,
+import {
+  CollabKitError,
+  type CollabKitApi,
+  type ManagementElement,
+  type ManagementOpen,
+  type ManagementOptions,
 } from '../../../client/src/api.ts';
 import { createCollabKitApi } from '../../../client/src/index.ts';
 import '../../../client/src/manage/index.ts';
@@ -643,6 +644,42 @@ describe('<ck-management>', () => {
     await pickWorkpiece(element, 'Altraum');
     expect(textOf(element)).toContain('Zurückholen');
     expect(() => button(element, 'Endgültig löschen')).toThrow();
+  });
+
+  it('offers deleting for good only where CK allows it, and says why one was refused', async () => {
+    const room = await alice.rooms.create({ name: 'Sperrraum' });
+    await alice.rooms.archive(room._id);
+
+    // The option says yes, CK says no.
+    const locked = {
+      ...alice,
+      archive: {
+        ...alice.archive,
+        capabilities: async () => ({ enabled: true, deleteEnabled: false, deleteAllowed: false }),
+      },
+    };
+    const element = await mount(locked, { archiveDelete: true });
+    await click(element, 'Archiv');
+    await pickWorkpiece(element, 'Sperrraum');
+    expect(textOf(element)).toContain('Zurückholen');
+    expect(() => button(element, 'Endgültig löschen')).toThrow();
+
+    // A refusal with a code is told in its own words.
+    const refusing = {
+      ...alice,
+      archive: {
+        ...alice.archive,
+        remove: async () => {
+          throw new CollabKitError(403, 'deleting for good is switched off', 'delete_disabled');
+        },
+      },
+    };
+    const second = await mount(refusing, { archiveDelete: true });
+    await click(second, 'Archiv');
+    await pickWorkpiece(second, 'Sperrraum');
+    await click(second, 'Endgültig löschen');
+    await click(second, 'Ja, endgültig löschen');
+    expect(textOf(second)).toContain('Endgültiges Löschen ist auf diesem Server nicht erlaubt.');
   });
 
   it('shows no archive tab and no archive button unless archive is true', async () => {

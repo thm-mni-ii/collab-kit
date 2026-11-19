@@ -37,11 +37,14 @@ export interface CollabKitApi {
 export class CollabKitError extends Error {
   /** The HTTP status of a call, or the close code that ended a session. */
   readonly status: number;
+  /** What CK names as the reason for machines, e.g. archive_disabled, delete_disabled or forbidden. */
+  readonly code: string | undefined;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = 'CollabKitError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -575,8 +578,20 @@ export interface ArchiveQuery {
   readonly kind?: ArchiveKind;
 }
 
+/** What the archive can do on this instance, and what the token may do of it. */
+export interface ArchiveCapabilities {
+  /** Whether the archive exists on this instance. */
+  readonly enabled: boolean;
+  /** Whether the server allows deleting for good, whoever asks. */
+  readonly deleteEnabled: boolean;
+  /** Whether this token may delete for good: allowed by the server and manage everywhere. */
+  readonly deleteAllowed: boolean;
+}
+
 /** The routes under /archive: what was archived, bringing it back, deleting it for good. */
 export interface ArchiveRoutes {
+  /** What the archive can do here; answers with the archive off too, and takes any token. */
+  capabilities(): Promise<ArchiveCapabilities>;
   /** The entries the token saw while they were live, newest first. */
   list(query?: ArchiveQuery): Promise<ArchiveEntry[]>;
   /** Brings it back unchanged under its keys; takes manage at it, as archiving did. */

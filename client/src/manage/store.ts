@@ -5,6 +5,7 @@ import type { ReactiveControllerHost } from 'lit';
 import type {
   Activity,
   ActorName,
+  ArchiveCapabilities,
   ArchiveEntry,
   Grant,
   Group,
@@ -75,6 +76,8 @@ export interface State {
   readonly workpieces: ReadonlyMap<string, Workpiece>;
   /** What is in the archive, newest first, as far as the person saw it live. */
   readonly archived: readonly ArchiveEntry[];
+  /** What the archive can do for this person; none while unknown, e.g. at a CK without the route. */
+  readonly archiveCapabilities: ArchiveCapabilities | undefined;
   /** Names to the keys of people, as CK or findPeople gave them. */
   readonly names: Readonly<Record<string, string>>;
   /** Whether the person holds manage everywhere, which creating a room or a group takes. */
@@ -99,6 +102,7 @@ const EMPTY: State = {
   groups: [],
   workpieces: new Map(),
   archived: [],
+  archiveCapabilities: undefined,
   names: {},
   mayCreate: false,
   selected: { rooms: undefined, groups: undefined, workpieces: undefined, archive: undefined },
@@ -119,6 +123,12 @@ export function switched(rights: readonly Right[], right: Right): Right[] {
 /** By name, as people look for them. */
 function byName<Item extends { readonly name: string }>(items: readonly Item[]): Item[] {
   return items.toSorted((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The code CK named for a refusal, if it named one. */
+function codeOf(error: unknown): string | undefined {
+  const code = (error as { readonly code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
 }
 
 /** The status CK refused with, if it was a refusal of CK. */
@@ -151,14 +161,19 @@ export class Store {
     }
 
     await this.run(async () => {
-      const [everywhere, rooms, groups, workpieces, archived] = await Promise.all([
-        ck.me.rights(),
-        ck.me.rooms(),
-        ck.groups.list(),
-        ck.workpieces.list(),
-        // With the archive off, CK would refuse the call.
-        this.host.archive === true ? ck.archive.list() : Promise.resolve([]),
-      ]);
+      const [everywhere, rooms, groups, workpieces, archived, archiveCapabilities] =
+        await Promise.all([
+          ck.me.rights(),
+          ck.me.rooms(),
+          ck.groups.list(),
+          ck.workpieces.list(),
+          // With the archive off, CK would refuse the call.
+          this.host.archive === true ? ck.archive.list() : Promise.resolve([]),
+          // An older CK lacks the route; then the option alone decides.
+          this.host.archive === true
+            ? ck.archive.capabilities().catch(() => undefined)
+            : Promise.resolve(undefined),
+        ]);
       // Another ck came meanwhile and loads its own.
       if (ck !== this.host.ck) {
         return;
@@ -169,6 +184,7 @@ export class Store {
         groups: byName(groups),
         workpieces: new Map(workpieces.map((workpiece) => [workpiece._id, workpiece])),
         archived,
+        archiveCapabilities,
         loaded: true,
       });
       // The tool, or another person lacking manage everywhere, may leave the current tab out.
@@ -702,6 +718,13 @@ export class Store {
   private messageOf(error: unknown): string {
     const t = this.words();
     const status = statusOf(error);
+    const code = codeOf(error);
+    if (code === 'archive_disabled') {
+      return t.archiveDisabled;
+    }
+    if (code === 'delete_disabled') {
+      return t.deleteDisabled;
+    }
     if (status === 401) {
       return t.signedOut;
     }

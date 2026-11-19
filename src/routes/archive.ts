@@ -16,6 +16,7 @@ export function archiveRoutes(
   db: Db,
   recheckAccess: () => Promise<void>,
   archiveDelete: boolean,
+  archiveEnabled = true,
 ): Router {
   const archive = archiveOf(db);
   const routes = Router();
@@ -39,13 +40,30 @@ export function archiveRoutes(
     async (actor, id) => (await rightsAt(actor, id)).has('manage'),
     403,
     'not allowed to restore this entry',
+    'forbidden',
   );
-  // Gone for good cannot be undone, so it takes manage everywhere; behind seeing as well.
-  const deleting = guard(
-    async (actor) => archiveDelete && (await may(db, actor, 'manage')),
-    403,
-    'not allowed to delete this entry',
-  );
+  // Gone for good cannot be undone, so the server must allow it and the actor needs manage; behind seeing as well.
+  const deleting: RequestHandler = async (request, response, next) => {
+    // The server does not allow it at all.
+    if (!archiveDelete) {
+      return fail(response, 403, 'deleting for good is switched off', 'delete_disabled');
+    }
+    // The server allows it, the actor lacks the right.
+    if (!(await may(db, actorOf(request), 'manage'))) {
+      return fail(response, 403, 'not allowed to delete this entry', 'forbidden');
+    }
+    next();
+  };
+
+  // What the archive can do here; answers with the archive off too, and takes only a token.
+  routes.get('/archive/capabilities', async (request, response) => {
+    const allowed = archiveEnabled && archiveDelete && (await may(db, actorOf(request), 'manage'));
+    response.json({
+      enabled: archiveEnabled,
+      deleteEnabled: archiveEnabled && archiveDelete,
+      deleteAllowed: allowed,
+    });
+  });
 
   routes.get('/archive', async (request, response) => {
     const kind = request.query['kind'];
@@ -109,12 +127,16 @@ function isArchiveKind(raw: unknown): raw is ArchiveKind {
 /** Archiving a room, group or workpiece, which sits with the routes of each kind. */
 const ARCHIVING = /^\/(rooms|groups|workpieces)\/[^/]+\/archive$/;
 
-/** Answers 403 on every route of the archive, and on archiving, when the archive is switched off. */
+/** Answers 403 on every route of the archive but its capabilities, and on archiving, when the archive is switched off. */
 export const archiveOff: RequestHandler = (request, response, next) => {
   // The archive itself, or the archiving of one thing.
   const path = request.path;
+  // Only asking what the archive can do still gets an answer.
+  if (path === '/archive/capabilities' && request.method === 'GET') {
+    return next();
+  }
   if (path === '/archive' || path.startsWith('/archive/') || ARCHIVING.test(path)) {
-    return fail(response, 403, 'the archive is switched off');
+    return fail(response, 403, 'the archive is switched off', 'archive_disabled');
   }
   next();
 };
