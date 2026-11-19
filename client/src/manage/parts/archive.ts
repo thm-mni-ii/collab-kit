@@ -96,7 +96,7 @@ export class CkArchiveDetail extends LitElement {
           ? html`<div class="confirm" role="alert">
                 <p>${t.deleteQuestion}</p>
                 <button
-                  class="button primary"
+                  class="button primary danger"
                   ?disabled=${this.busy}
                   @click=${() => emit(this, 'ck-delete')}
                 >

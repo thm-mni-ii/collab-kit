@@ -194,6 +194,11 @@ export const base = css`
     border-color: var(--accent);
     color: var(--on-accent);
   }
+  .button.primary.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: var(--on-accent);
+  }
   .form {
     display: flex;
     flex-wrap: wrap;

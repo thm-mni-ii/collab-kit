@@ -428,7 +428,7 @@ export class Management extends LitElement implements ManagementElement {
       .rooms=${store.state.rooms}
       .form=${store.state.form}
       .busy=${store.state.busy}
-      .canDelete=${this.archiveDelete === true}
+      .canDelete=${this.archiveDelete === true && (store.state.archiveCapabilities?.deleteAllowed ?? true)}
     ></ck-archive-detail>`;
   }
 

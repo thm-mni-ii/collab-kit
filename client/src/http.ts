@@ -50,20 +50,22 @@ export async function fetchRoute(
   });
 
   if (!response.ok) {
-    throw new CollabKitError(response.status, await reasonOf(response));
+    const { reason, code } = await reasonOf(response);
+    throw new CollabKitError(response.status, reason, code);
   }
   return response;
 }
 
-/** The reason CK names in a refusal, or the status text where it names none. */
-async function reasonOf(response: Response): Promise<string> {
+/** The reason and the code CK names in a refusal, or the status text where it names none. */
+async function reasonOf(response: Response): Promise<{ reason: string; code?: string }> {
   const body: unknown = await response.json().catch(() => undefined);
 
   if (typeof body === 'object' && body !== null && 'error' in body) {
     const { error } = body;
     if (typeof error === 'string') {
-      return error;
+      const code = 'code' in body && typeof body.code === 'string' ? body.code : undefined;
+      return code === undefined ? { reason: error } : { reason: error, code };
     }
   }
-  return response.statusText;
+  return { reason: response.statusText };
 }
