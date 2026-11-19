@@ -6,9 +6,9 @@ import type { Document, ObjectId } from 'mongodb';
 import type { Actor } from '../model/actor.ts';
 import { asObject, asObjectId } from '../utils/input.ts';
 
-/** Every refusal answers in the same shape, so a client parses one thing. */
-export function fail(response: Response, status: number, error: string): void {
-  response.status(status).json({ error });
+/** Every refusal answers in the same shape, so a client parses one thing; a code names the reason for machines. */
+export function fail(response: Response, status: number, error: string, code?: string): void {
+  response.status(status).json(code === undefined ? { error } : { error, code });
 }
 
 /** The actor requireActor set; none means a route sits outside it, a wiring mistake. */
@@ -59,10 +59,11 @@ export function guard(
   rule: (actor: Actor, id: ObjectId) => Promise<boolean>,
   status: number,
   error: string,
+  code?: string,
 ): RequestHandler {
   return async (request, response, next) => {
     if (!(await rule(actorOf(request), idOf(request)))) {
-      return fail(response, status, error);
+      return fail(response, status, error, code);
     }
     next();
   };

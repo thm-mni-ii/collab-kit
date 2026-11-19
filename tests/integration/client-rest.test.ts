@@ -80,6 +80,7 @@ const ROUTES = [
   'POST /rooms/:id/archive',
   'POST /groups/:id/archive',
   'GET /archive',
+  'GET /archive/capabilities',
   'POST /archive/:id/restore',
   'DELETE /archive/:id',
 ];
@@ -247,6 +248,17 @@ describe('the REST wrapper', () => {
       removed: true,
     });
     expect(await bob.me.rights(scope)).toEqual([]);
+    // What the archive can do: alice manages everywhere, bob does not.
+    expect(await alice.archive.capabilities()).toEqual({
+      enabled: true,
+      deleteEnabled: true,
+      deleteAllowed: true,
+    });
+    expect(await bob.archive.capabilities()).toEqual({
+      enabled: true,
+      deleteEnabled: true,
+      deleteAllowed: false,
+    });
     // Taken down into the archive, the only way out.
     expect(await alice.groups.archive(group._id)).toMatchObject({ _id: group._id });
     expect(await alice.rooms.archive(room._id, { reason: 'vorbei' })).toMatchObject({
@@ -602,6 +614,11 @@ describe('the REST wrapper', () => {
       status: 403,
       message: 'not allowed to create a room',
     });
+    // A refusal without a reason for machines carries no code.
+    await expect(bob.rooms.create({ name: 'Eigener Raum' })).rejects.toHaveProperty(
+      'code',
+      undefined,
+    );
   });
 
   it('reached every route of CK', () => {

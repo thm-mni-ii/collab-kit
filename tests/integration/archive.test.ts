@@ -748,7 +748,9 @@ describe('deleting from the archive', () => {
 
     // carol sees nothing, alice manages at the room but not everywhere.
     expect((await deleteAs('carol', id)).status).toBe(404);
-    expect((await deleteAs('alice', id)).status).toBe(403);
+    const lacking = await deleteAs('alice', id);
+    expect(lacking.status).toBe(403);
+    expect(lacking.body).toMatchObject({ code: 'forbidden' });
     const deleted = await deleteAs('admin', id, 'Frist abgelaufen');
     expect(deleted.status).toBe(200);
     expect(deleted.body).toEqual({ deleted: true });
@@ -810,7 +812,60 @@ describe('deleting from the archive', () => {
     });
     const answer = await request(locked).delete(`/archive/${entry?._id}`).set(as('admin'));
     expect(answer.status).toBe(403);
+    expect(answer.body).toEqual({
+      error: 'deleting for good is switched off',
+      code: 'delete_disabled',
+    });
     expect(await tracesOf(storage.archive, [roomId])).toBeGreaterThan(0);
+  });
+
+  it('tells what the archive can do, with the archive off or deleting off too', async () => {
+    const serverWith = (options: { archiveEnabled?: boolean; archiveDelete?: boolean }) =>
+      createServer({
+        logger: silent,
+        api: createApi({
+          db: storage.db,
+          hub,
+          checkToken: createTokenCheck({ key: secret, algorithm: 'HS256' }),
+          logger: silent,
+          recheckAccess: async () => undefined,
+          ...options,
+        }),
+      });
+    const asked = async (instance: ReturnType<typeof serverWith>, actor: string) =>
+      (await request(instance).get('/archive/capabilities').set(as(actor))).body;
+
+    // admin manages everywhere, alice does not.
+    expect(await asked(server, 'admin')).toEqual({
+      enabled: true,
+      deleteEnabled: true,
+      deleteAllowed: true,
+    });
+    expect(await asked(server, 'alice')).toEqual({
+      enabled: true,
+      deleteEnabled: true,
+      deleteAllowed: false,
+    });
+    expect(await asked(serverWith({ archiveDelete: false }), 'admin')).toEqual({
+      enabled: true,
+      deleteEnabled: false,
+      deleteAllowed: false,
+    });
+    // Answers with the archive off, while the rest of it refuses.
+    const off = serverWith({ archiveEnabled: false, archiveDelete: true });
+    expect(await asked(off, 'admin')).toEqual({
+      enabled: false,
+      deleteEnabled: false,
+      deleteAllowed: false,
+    });
+    const refused = await request(off).get('/archive').set(as('admin'));
+    expect(refused.status).toBe(403);
+    expect(refused.body).toEqual({
+      error: 'the archive is switched off',
+      code: 'archive_disabled',
+    });
+    // Only a token is needed, none gets 401.
+    expect((await request(server).get('/archive/capabilities')).status).toBe(401);
   });
 
   it('refuses every archive route when the instance switched the archive off', async () => {

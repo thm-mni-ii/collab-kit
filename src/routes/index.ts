@@ -64,7 +64,14 @@ export function createApi(options: ApiOptions): Router {
   api.use(grantRoutes(options.db, options.recheckAccess, options.service));
   api.use(actorRoutes(options.db));
   api.use(workpieceRoutes(options.db, options.hub, options.logger));
-  api.use(archiveRoutes(options.db, options.recheckAccess, options.archiveDelete ?? true));
+  api.use(
+    archiveRoutes(
+      options.db,
+      options.recheckAccess,
+      options.archiveDelete ?? true,
+      options.archiveEnabled ?? true,
+    ),
+  );
   api.use(eventRoutes(options.db));
   const decisions = options.decisionStates ?? [];
   api.use(commentRoutes(options.db, decisions));
